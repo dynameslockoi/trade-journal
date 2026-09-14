@@ -29,11 +29,13 @@ Phase 4 adds the core journal workflow:
 Run the complete `supabase/schema.sql` in Supabase SQL Editor (it is idempotent, so re-running it
 applies any phase you have not run yet). It creates the tables, RLS policies and the **private** `trade-screenshots` Storage bucket with its folder-scoped policies, so no manual bucket setup is needed.
 
-Set `.env.local`:
+Set `.env.local` (copy `.env.example` and fill it in):
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your-project-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-or-publishable-key
 ```
+Only the anon/publishable key is used — every table is guarded by per-user RLS, so the app never needs
+a service-role key.
 Then:
 ```bash
 npm install
