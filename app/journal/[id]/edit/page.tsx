@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { BURSA_BOARD_LOT, SESSIONS, calculateGrossPnl, calculateRisk, formatMoney, formatR, localDatetimeToIso, numberOrNull, roundMoney, sessionBucket, sessionLabel, stripUnknownColumn, toLocalDatetimeInput } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
+import { LoadError, firstError } from "@/components/load-error";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ export default function EditTrade() {
   const router = useRouter();
   const [form, setForm] = useState<any>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [strategies, setStrategies] = useState<any[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -58,6 +60,8 @@ export default function EditTrade() {
       const row = t.data as any;
       // Sessions are the two Bursa windows, so an older row's free-form value is normalised here.
       setForm({ ...row, entry_at: toLocalDatetimeInput(row.entry_at), exit_at: toLocalDatetimeInput(row.exit_at), session: sessionBucket(row.session, row.entry_at) });
+      // The trade itself loaded; a failed list would still leave the pickers empty and unexplained.
+      setLoadError(firstError(a, st, tg));
       setAccounts((a.data ?? []) as Account[]);
       setStrategies(st.data ?? []);
       setTags((tg.data ?? []) as Tag[]);
@@ -206,6 +210,7 @@ export default function EditTrade() {
   return (
     <div className="content max-w-[1100px]">
       <PageHeader eyebrow="Journal / Edit Trade" title={`Edit ${form.symbol}`} subtitle="Charges and gross P&L recalculate as you change the figures." />
+      <LoadError message={loadError} what="your accounts, strategies and tags" />
       <form onSubmit={save} className="grid">
         <Card>
           <CardHeader><CardTitle>Trade Details</CardTitle></CardHeader>

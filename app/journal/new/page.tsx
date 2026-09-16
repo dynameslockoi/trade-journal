@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { BURSA_BOARD_LOT, SESSIONS, calculateGrossPnl, calculateRisk, formatMoney, formatR, localDatetimeToIso, numberOrNull, roundMoney, sessionForTime, sessionLabel, stripUnknownColumn } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
+import { LoadError, firstError } from "@/components/load-error";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,6 +48,7 @@ export default function NewTrade() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [form, setForm] = useState(init);
   const [broker, setBroker] = useState(DEFAULT_BROKER_ID);
@@ -68,6 +70,8 @@ export default function NewTrade() {
         s.from("strategies").select("id,name").order("name"),
         s.from("tags").select("id,name,category").order("name"),
       ]);
+      // A failed list would leave the form with empty pickers and no explanation.
+      setLoadError(firstError(a, st, t));
       setAccounts((a.data ?? []) as Account[]);
       setStrategies((st.data ?? []) as Strategy[]);
       setTags((t.data ?? []) as Tag[]);
@@ -203,6 +207,7 @@ export default function NewTrade() {
   return (
     <div className="content max-w-[1100px]">
       <PageHeader eyebrow="Journal / New Trade" title="Add Trade" subtitle="Charges and gross P&L are calculated from the Bursa lot size and your broker preset." />
+      <LoadError message={loadError} what="your accounts, strategies and tags" />
       <form onSubmit={save} className="grid">
         <Card>
           <CardHeader><CardTitle>Trade Details</CardTitle></CardHeader>

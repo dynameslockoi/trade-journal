@@ -7,6 +7,7 @@ import { MoreHorizontal, SquarePen } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { FilterBar, emptyFilters, applyFilters, type Filters } from "@/components/filter-bar";
 import { PageHeader } from "@/components/page-header";
+import { LoadError, firstError } from "@/components/load-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
@@ -26,6 +27,7 @@ export default function Journal() {
   const [strategies, setStrategies] = useState<any[]>([]);
   const [tags, setTags] = useState<any[]>([]);
   const [f, setF] = useState<Filters>(emptyFilters);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => { (async () => {
@@ -39,6 +41,7 @@ export default function Journal() {
     ]);
     // `is_ipo` arrives with the Phase 9 migration; until then the journal still lists trades.
     const a = a0.error ? await s.from("trades").select(`id,${COLUMNS}`).order("entry_at", { ascending: false }) : a0;
+    setLoadError(firstError(a, b, c, d));
     setR((a.data ?? []).map(normalizeTrade) as Trade[]);
     setAccounts(b.data ?? []);
     setStrategies(c.data ?? []);
@@ -137,8 +140,11 @@ export default function Journal() {
       subtitle={`${rows.length} matching trade${rows.length === 1 ? "" : "s"}`}
       actions={<Button onClick={() => router.push("/journal/new")}>+ Add Trade</Button>}
     />
+    <LoadError message={loadError} what="your trades" />
     <FilterBar filters={f} setFilters={setF} accounts={accounts} strategies={strategies} tags={tags} />
-    <div className="card">
+    {/* A failed load leaves the table saying "No trades match these filters", which reads as an
+        empty journal rather than an unreadable one — the banner above says it instead. */}
+    {loadError?null:<div className="card">
       <div className="card-content">
         <DataTable
           columns={columns}
@@ -151,6 +157,6 @@ export default function Journal() {
           empty="No trades match these filters."
         />
       </div>
-    </div>
+    </div>}
   </div>;
 }

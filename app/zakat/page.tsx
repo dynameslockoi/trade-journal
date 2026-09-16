@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { PageHeader } from "@/components/page-header";
+import { LoadError, firstError } from "@/components/load-error";
 import { StatCard } from "@/components/stat-card";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Alert } from "@/components/ui/alert";
@@ -15,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  formatMoney, normalizeTrade, roundMoney, tradeYear, tradeYears, zakatForYear, ZAKAT_BASES,
+  dayKey, formatMoney, normalizeTrade, roundMoney, tradeYear, tradeYears, zakatForYear, ZAKAT_BASES,
   ZAKAT_RATE_DEFAULT, type Trade, type ZakatBasis,
 } from "@/lib/trading";
 
@@ -36,7 +37,8 @@ type Payment = {
   note: string | null;
 };
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Today in Malaysia, so a payment recorded before 08:00 is not filed under yesterday.
+const today = () => dayKey(new Date());
 
 export default function ZakatPage() {
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -47,6 +49,7 @@ export default function ZakatPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // The editable copy of the selected year's settings; saved to zakat_years on demand.
   const [draft, setDraft] = useState({ rate: String(ZAKAT_RATE_DEFAULT), basis: "net" as ZakatBasis, other: "", manual: "", nisab: "" });
@@ -59,6 +62,8 @@ export default function ZakatPage() {
       s.from("zakat_years").select("*"),
       s.from("zakat_payments").select("*").order("paid_on", { ascending: false }),
     ]);
+    // A missing zakat table is its own message (needsSchema); any other failure is a load error.
+    setLoadError(t.error?.message ?? null);
     setTrades(((t.data ?? []) as any[]).map(normalizeTrade));
     if (y.error || p.error) setNeedsSchema(true);
     else {
@@ -98,6 +103,7 @@ export default function ZakatPage() {
   const result = useMemo(() => zakatForYear(yearTrades, input), [yearTrades, draft]);
   const paidFor = (y: number) => roundMoney(payments.filter(p => Number(p.year) === y).reduce((sum, p) => sum + Number(p.amount || 0), 0));
   const paid = paidFor(year);
+  const yearPayments = useMemo(() => payments.filter(p => Number(p.year) === year), [payments, year]);
   const balance = roundMoney(result.due - paid);
   const currency = "MYR";
 
@@ -176,7 +182,7 @@ export default function ZakatPage() {
     <div className="content">
       <PageHeader
         title="Zakat"
-        subtitle="2.5% of the year's net trading profit, less whatever you have already paid."
+        subtitle="A journal estimate — 2.5% of the year's net trading profit, less what you have already paid. Confirm the basis and rate with your zakat authority."
         actions={
           <div className="form-field" style={{ minWidth: 150 }}>
             <Label htmlFor="zk-year">Year</Label>
@@ -189,6 +195,7 @@ export default function ZakatPage() {
           </div>
         }
       />
+      <LoadError message={loadError} what="your zakat figures" />
 
       {needsSchema && (
         <Card>
@@ -203,7 +210,7 @@ export default function ZakatPage() {
         </Card>
       )}
 
-      {loading ? <Card><CardContent>Loading…</CardContent></Card> : <>
+      {loadError ? null : loading ? <Card><CardContent>Loading…</CardContent></Card> : <>
         {(msg || err) && <Alert variant={err ? "error" : "success"}>{err || msg}</Alert>}
 
         <div className="grid four">
@@ -214,7 +221,7 @@ export default function ZakatPage() {
         </div>
 
         <div className="grid two pair-grid">
-          <Card>
+          <Card className="pair-card">
             <CardContent>
               <div className="card-head">
                 <div>
@@ -257,18 +264,22 @@ export default function ZakatPage() {
                   </div>
                 )}
               </div>
-              <div className="settings-total">
-                <span className="muted">{formatMoney(result.base, currency)} × {result.rate}%</span>
-                <b className={result.due > 0 ? "" : "muted"}>{formatMoney(result.due, currency)}</b>
-              </div>
-              <div className="settings-actions">
-                <Button onClick={saveSettings}>Save {year} settings</Button>
-                <Button variant="secondary" type="button" onClick={() => setDraft({ rate: String(ZAKAT_RATE_DEFAULT), basis: "net", other: "", manual: "", nisab: "" })}>Reset to 2.5%</Button>
+              {/* Pinned to the bottom edge so the pair reads as two equal cards, whatever the
+                  heights of their contents. */}
+              <div className="pair-foot">
+                <div className="settings-total">
+                  <span className="muted">{formatMoney(result.base, currency)} × {result.rate}%</span>
+                  <b className={result.due > 0 ? "" : "muted"}>{formatMoney(result.due, currency)}</b>
+                </div>
+                <div className="settings-actions">
+                  <Button onClick={saveSettings}>Save {year} settings</Button>
+                  <Button variant="secondary" type="button" onClick={() => setDraft({ rate: String(ZAKAT_RATE_DEFAULT), basis: "net", other: "", manual: "", nisab: "" })}>Reset to 2.5%</Button>
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="pair-card">
             <CardContent>
               <div className="card-head">
                 <div>
@@ -296,13 +307,16 @@ export default function ZakatPage() {
                 </div>
                 <Button className="field-wide">Record payment</Button>
               </form>
-              <div className="mt-4">
+              {/* The empty state replaces the table rather than sitting inside it: a header row over
+                  nothing reads as a table that failed to load. */}
+              {yearPayments.length ? (
+                <div className="pair-list mt-4">
                 <Table>
                   <TableHeader>
                     <TableRow><TableHead>Date</TableHead><TableHead>Channel</TableHead><TableHead>Note</TableHead><TableHead>Amount</TableHead><TableHead /></TableRow>
                   </TableHeader>
                   <TableBody>
-                    {payments.filter(p => Number(p.year) === year).map(p => (
+                    {yearPayments.map(p => (
                       <TableRow key={p.id}>
                         <TableCell>{p.paid_on}</TableCell>
                         <TableCell>{p.method || "—"}</TableCell>
@@ -320,12 +334,15 @@ export default function ZakatPage() {
                         </TableCell>
                       </TableRow>
                     ))}
-                    {!payments.some(p => Number(p.year) === year) && (
-                      <TableRow><TableCell colSpan={5}><div className="empty">Nothing paid for {year} yet.</div></TableCell></TableRow>
-                    )}
                   </TableBody>
                 </Table>
-              </div>
+                </div>
+              ) : (
+                <div className="empty empty-inline">
+                  Nothing paid for {year} yet.<br />
+                  Record the first payment above.
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

@@ -16,6 +16,7 @@ import {
   splitDateTime,
   toISODate,
   today,
+  wallClock,
 } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
@@ -156,9 +157,10 @@ export function DateTimePicker({
   const setPart = (part: "hour" | "minute", v: string) =>
     onChange(joinDateTime(date, part === "hour" ? `${v}:${minute}` : `${hour}:${v}`));
 
+  // "Now" in Malaysia, so it lands on the same clock the journal reads the entry stamp in.
   const now = () => {
-    const d = new Date();
-    onChange(`${toISODate(d)}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
+    const { date: d, time: t } = wallClock(new Date());
+    onChange(`${d}T${t}`);
   };
 
   return (

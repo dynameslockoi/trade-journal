@@ -6,6 +6,7 @@ import { formatMoney } from "@/lib/trading";
 import { BROKER_PRESETS, DEFAULT_BROKER_ID, brokerPreset } from "@/lib/fees";
 import { PageHeader } from "@/components/page-header";
 import { ConfirmButton } from "@/components/confirm-button";
+import { LoadError, firstError } from "@/components/load-error";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +27,8 @@ export default function Accounts() {
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState(initial);
   const [error, setError] = useState("");
+  // Separate from the form's own error: a failed list load is a page-level problem, not a field one.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const formCard = useRef<HTMLDivElement>(null);
 
   const load = async () => {
@@ -34,6 +37,7 @@ export default function Accounts() {
       s.from("trading_accounts").select("*").order("created_at", { ascending: false }),
       s.from("trades").select("account_id,net_pnl"),
     ]);
+    setLoadError(firstError(a, t));
     setItems((a.data ?? []) as Account[]);
     setTrades((t.data ?? []) as Trade[]);
   };
@@ -112,6 +116,7 @@ export default function Accounts() {
           <Button onClick={() => { setError(""); setEditing(null); setForm(initial); setOpen(true); }}>+ Add Account</Button>
         }
       />
+      <LoadError message={loadError} what="your accounts" />
       {error && <Alert variant="error">{error}</Alert>}
 
       {open && (

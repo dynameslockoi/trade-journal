@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
@@ -15,6 +15,13 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // `/auth/callback` sends a failed sign-in link here with its reason, so a dead link reads as one
+  // instead of a silent bounce to a login form with no explanation.
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("error");
+    if (reason) setError(reason);
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();

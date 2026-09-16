@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { PageHeader } from "@/components/page-header";
+import { LoadError } from "@/components/load-error";
+import { dayKey, myParts } from "@/lib/trading";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -16,18 +18,20 @@ const DAILY_TEXT = [["what_went_well", "What went well?"], ["mistakes", "Biggest
 const WEEKLY_TEXT = [["summary", "What happened this week?"], ["lessons", "Key lessons / recurring patterns"], ["action_plan", "Action plan for next week"]] as const;
 
 export default function Reviews() {
-  const today = new Date().toISOString().slice(0, 10);
+  // Today in Malaysia. Reading the UTC date instead would open the form on yesterday's date for the
+  // first eight hours of every Malaysian morning.
+  const today = dayKey(new Date());
   const monday = (() => {
-    const d = new Date();
-    const day = d.getDay();
-    d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
-    return d.toISOString().slice(0, 10);
+    const parts = myParts(new Date())!;
+    const day = new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
+    return dayKey(new Date(Date.UTC(parts.year, parts.month - 1, parts.day - (day === 0 ? 6 : day - 1), 4)));
   })();
 
   const [d, setD] = useState(today);
   const [w, setW] = useState(monday);
   const [daily, setDaily] = useState<any>({ plan_followed: false, execution_score: 8, mood_score: 8, what_went_well: "", mistakes: "", tomorrow_plan: "" });
   const [weekly, setWeekly] = useState<any>({ summary: "", lessons: "", action_plan: "" });
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -36,6 +40,8 @@ export default function Reviews() {
         s.from("daily_reviews").select("*").eq("review_date", d).maybeSingle(),
         s.from("weekly_reviews").select("*").eq("week_start", w).maybeSingle(),
       ]);
+      // Without this a failed read looks like an empty review and the next save would overwrite one.
+      setLoadError(a.error?.message ?? b.error?.message ?? null);
       if (a.data) setDaily(a.data);
       if (b.data) setWeekly(b.data);
     })();
@@ -52,6 +58,7 @@ export default function Reviews() {
 
   return <div className="content">
     <PageHeader title="Reviews" subtitle="Turn your trading history into repeatable improvements." />
+    <LoadError message={loadError} what="this review" />
     <div className="grid two">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-3">

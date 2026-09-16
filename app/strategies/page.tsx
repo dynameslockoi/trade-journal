@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { PageHeader } from "@/components/page-header";
 import { ConfirmButton } from "@/components/confirm-button";
+import { LoadError } from "@/components/load-error";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,16 +43,19 @@ export default function StrategiesAndTags() {
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState(blank);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [tagName, setTagName] = useState("");
   const [tagCategory, setTagCategory] = useState<string>("setup");
   const formCard = useRef<HTMLDivElement>(null);
 
   const loadStrategies = async () => {
-    const { data } = await createClient().from("strategies").select("*").order("name");
+    const { data, error } = await createClient().from("strategies").select("*").order("name");
+    if (error) setLoadError(error.message);
     setStrategies((data ?? []) as Strategy[]);
   };
   const loadTags = async () => {
-    const { data } = await createClient().from("tags").select("*").order("category").order("name");
+    const { data, error } = await createClient().from("tags").select("*").order("category").order("name");
+    if (error) setLoadError(error.message);
     setTags((data ?? []) as Tag[]);
   };
   useEffect(() => {
@@ -151,6 +155,7 @@ export default function StrategiesAndTags() {
         title="Strategies & Tags"
         subtitle="The setups you trade and the labels you stick on them — one page, two lists."
       />
+      <LoadError message={loadError} what="your strategies and tags" />
       {error && <Alert variant="error">{error}</Alert>}
 
       <Tabs value={tab} onValueChange={setTab}>

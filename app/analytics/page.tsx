@@ -5,13 +5,14 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContaine
 import { FilterBar, applyFilters, emptyFilters, type Filters } from "@/components/filter-bar";
 import { StatCard } from "@/components/stat-card";
 import { PageHeader } from "@/components/page-header";
+import { LoadError, firstError } from "@/components/load-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CHART, axisProps, barCursor, gridProps, pnlColor, tooltipProps } from "@/components/chart-theme";
 import {
   bestStreak, calculateStats, formatMoney, holdingBucket, HOLDING_BUCKETS, HOUR_BUCKETS, hourBucket,
-  hourSession, LOTS_BUCKETS, lotsBucket, normalizeTrade, numberOrNull, QUALITY_BUCKETS, qualityBucket,
-  SESSION_WINDOWS, type Trade,
+  hourSession, LOTS_BUCKETS, lotsBucket, myParts, normalizeTrade, numberOrNull, QUALITY_BUCKETS,
+  percentOf, qualityBucket, SESSION_WINDOWS, type Trade,
 } from "@/lib/trading";
 
 type GroupRow = { name: string; trades: number; pnl: number; wins: number; winRate: number; avg: number; order: number };
@@ -37,19 +38,28 @@ function hourSessionLabel(hour: string) {
   return session ? `${session} · ${SESSION_WINDOWS[session]}` : null;
 }
 
+/**
+ * The trade's Malaysian calendar day, carried as a UTC midnight so the weekday it reports cannot be
+ * dragged onto a neighbouring day by whatever clock is reading it.
+ */
+function myDay(entryAt: string) {
+  const parts = myParts(entryAt);
+  return parts ? new Date(Date.UTC(parts.year, parts.month - 1, parts.day)) : new Date(NaN);
+}
+
 /** Which band a trade lands in, plus the order the chart places that band at. */
 function bandOf(t: Trade, key: GroupKey): { name: string; order: number } {
-  const date = new Date(t.entry_at);
+  const date = myDay(t.entry_at);
   const name =
     key === "strategy" ? t.strategies?.name || "Unassigned"
-    : key === "weekday" ? date.toLocaleDateString(undefined, { weekday: "short" })
+    : key === "weekday" ? date.toLocaleDateString("en-MY", { weekday: "short", timeZone: "UTC" })
     : key === "hour" ? hourBucket(t.entry_at)
     : key === "holding" ? holdingBucket(t.entry_at, t.exit_at)
     : key === "lots" ? lotsBucket(t.position_size)
     : key === "quality" ? qualityBucket(t)
     : String((t as any)[key] ?? "Unassigned");
   // Weekdays sort Monday-first; bands follow their list; the rest keep insertion order.
-  const order = key === "weekday" ? (date.getDay() + 6) % 7 : BANDS[key]?.indexOf(name) ?? 0;
+  const order = key === "weekday" ? (date.getUTCDay() + 6) % 7 : BANDS[key]?.indexOf(name) ?? 0;
   return { name, order: order < 0 ? 0 : order };
 }
 
@@ -120,16 +130,18 @@ export default function Analytics() {
   const [tags, setTags] = useState<any[]>([]);
   const [filters, setFilters] = useState<Filters>({ ...emptyFilters });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       const s = createClient();
       const [a, b, c, d] = await Promise.all([
         s.from("trades").select("id,symbol,direction,entry_at,exit_at,position_size,setup_quality,execution_quality,discipline,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,mae,mfe,strategies(name),trade_tags(tag_id)").order("entry_at"),
-        s.from("trading_accounts").select("id,name,currency"),
+        s.from("trading_accounts").select("id,name,currency,starting_balance"),
         s.from("strategies").select("id,name"),
         s.from("tags").select("id,name"),
       ]);
+      setLoadError(firstError(a, b, c, d));
       setAll(((a.data ?? []) as any[]).map(normalizeTrade));
       setAccounts(b.data ?? []);
       setStrategies(c.data ?? []);
@@ -160,27 +172,42 @@ export default function Analytics() {
   const eq = stats.equity.map(x => ({ x: x.x, pnl: x.pnl }));
   // Without a stop loss a trade has no R multiple, so the two R cards would read "+0.00R" — a
   // number that looks like a break-even edge but is really an absence. Money per trade stands in.
-  const hasR = useMemo(() => ts.some(t => numberOrNull(t.r_multiple) !== null), [ts]);
+  // The mean is taken over the trades that carry a stop, never over the blanks counted as zeroes.
+  const hasR = stats.rCount > 0;
+  const avgR = stats.avgR ?? 0;
   const perTrade = ts.length ? stats.pnl / ts.length : null;
+  // Same rule as the dashboard: quote the drawdown against the capital behind it when the starting
+  // balances say what that is, rather than against a P&L peak that may be a few hundred ringgit.
+  const capital = (() => {
+    const selected = accounts.find(a => a.id === filters.account);
+    if (selected) return Number(selected.starting_balance || 0) > 0 ? Number(selected.starting_balance) : null;
+    const funded = accounts.reduce((sum, a) => sum + Number(a.starting_balance || 0), 0);
+    return funded > 0 ? funded : null;
+  })();
+  const ddOnCapital = percentOf(stats.maxDrawdown, capital);
+  const ddSub = ddOnCapital === null
+    ? `${stats.maxDrawdownPct.toFixed(1)}% of the P&L peak`
+    : `${Math.abs(ddOnCapital).toFixed(1)}% of ${formatMoney(capital, currency)} capital`;
 
   return (
     <div className="content">
       <PageHeader title="Analytics" subtitle="Measure where your edge actually comes from." />
+      <LoadError message={loadError} />
       <FilterBar filters={filters} setFilters={setFilters} accounts={accounts} strategies={strategies} tags={tags} />
-      {loading ? <Card><CardContent>Loading analytics…</CardContent></Card> : <>
+      {loadError ? null : loading ? <Card><CardContent>Loading analytics…</CardContent></Card> : <>
         <div className="grid four">
           <StatCard label="Net P&L" value={formatMoney(stats.pnl, currency, true)} positive={stats.pnl >= 0} />
           <StatCard label="Win Rate" value={`${stats.winRate.toFixed(1)}%`} />
           <StatCard label="Profit Factor" value={stats.profitFactor === null ? "—" : stats.profitFactor.toFixed(2)} />
           {hasR ? (
-            <StatCard label="Expectancy" value={`${stats.expectancyR >= 0 ? "+" : ""}${stats.expectancyR.toFixed(2)}R`} positive={stats.expectancyR >= 0} />
+            <StatCard label="Expectancy" value={`${avgR >= 0 ? "+" : ""}${avgR.toFixed(2)}R`} sub={`mean of ${stats.rCount} trade${stats.rCount === 1 ? "" : "s"} with a stop`} positive={avgR >= 0} />
           ) : (
             <StatCard label="Expectancy" value={formatMoney(perTrade, currency, true)} sub="per trade · no stop losses recorded" positive={perTrade === null ? undefined : perTrade >= 0} />
           )}
         </div>
         <div className="grid four">
-          <StatCard label="Max Drawdown" value={formatMoney(-stats.maxDrawdown, currency)} sub={`${stats.maxDrawdownPct.toFixed(1)}% of filtered peak`} />
-          <StatCard label="Avg R" value={hasR ? `${stats.avgR >= 0 ? "+" : ""}${stats.avgR.toFixed(2)}R` : "—"} sub={hasR ? undefined : "needs a stop loss"} />
+          <StatCard label="Max Drawdown" value={formatMoney(-stats.maxDrawdown, currency)} sub={ddSub} />
+          <StatCard label="Avg R" value={hasR ? `${avgR >= 0 ? "+" : ""}${avgR.toFixed(2)}R` : "—"} sub={hasR ? `stop recorded on ${stats.rCount} of ${ts.length}` : "needs a stop loss"} />
           <StatCard label="Best Win Streak" value={String(bestStreak(ts, true))} />
           <StatCard label="Best Loss Streak" value={String(bestStreak(ts, false))} />
         </div>

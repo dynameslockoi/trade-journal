@@ -71,6 +71,26 @@ column that cannot be hidden, so the list ended in a checkbox with no label that
 now lists only hideable columns — and offers **Show every column** whenever one is hidden, since
 `resetColumnVisibility()` was reachable before only by reopening the page.
 
+## The zakat card pair
+
+Two fixes followed from the same screenshot. The pair was **not the same height** — measured live, 494px
+beside 569px, a 75px step — because `.grid.pair-grid` deliberately let each card end where its content
+did. It now stretches, and each card is a flex column whose last block is pushed to its bottom edge
+(`.pair-foot`), so both cards share one height and the shorter one spends the difference as breathing
+room in the middle rather than as a ragged edge. The payments card's empty state also stopped being a
+row *inside* the table: a header row over nothing reads as a table that failed to load, so it is now its
+own block that grows to fill the card.
+
+At a laptop width the pair was worse: side by side below 1200px each card dropped to ~300px, the inputs
+to **126px**, and every field hint wrapped to three lines — the screenshot's “word and box not nice”.
+The pair now stacks to one column under 1200px (it is the only `pair-grid` in the app), which gives each
+card the full content width and keeps its own two-column field grid comfortable at 287px per field.
+
+The long hint in a card head had a related fault: flex line breaking measures an item by its
+max-content width, so “Zakat is normally paid after the year closes…” pushed the summary pill onto a row
+of its own. A small basis on `.card-head > :first-child` makes the text block claim the leftover room
+and wrap inside itself, which keeps the pill top-right in all three cards that use it.
+
 ## Verification
 
 - `npm run typecheck`, `npm run build` and the 53 fee checks are clean.
@@ -82,3 +102,8 @@ now lists only hideable columns — and offers **Show every column** whenever on
   and `/zakat`'s narrow date field reads `16 Sept 2026` untruncated in a 149px trigger.
 - The temporary auth-redirect lift used for the earlier phase was not needed this time — but
   `git diff lib/supabase/middleware.ts` is empty all the same.
+- The zakat pair was measured in both states, by temporarily disabling the new breakpoint to force the
+  paired layout: paired, both cards report **510px tall at the same top** with the settings footer 21px
+  off the bottom edge; stacked at 940px, each card takes the full 631px width, the field grid resolves
+  to 287.5px columns and the hints drop from three lines to one or two. No page overflows horizontally
+  in either state.

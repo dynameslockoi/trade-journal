@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useParams, useRouter } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { ConfirmButton } from "@/components/confirm-button";
+import { LoadError } from "@/components/load-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +20,7 @@ export default function Detail() {
   const [shots, setShots] = useState<any[]>([]);
   const [tags, setTags] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => { (async () => {
     const s = createClient();
@@ -27,6 +29,8 @@ export default function Detail() {
       s.from("trade_screenshots").select("*").eq("trade_id", id).order("created_at"),
       s.from("trade_tags").select("tags(name,category)").eq("trade_id", id),
     ]);
+    // "Trade not found" must mean the row is gone, not that the request failed.
+    setLoadError(a.error && a.error.code !== "PGRST116" ? a.error.message : null);
     setT(a.data ? normalizeTrade(a.data) : null);
     setShots(b.data ?? []);
     setTags(c.data ?? []);
@@ -43,6 +47,7 @@ export default function Detail() {
   }
 
   if (loading) return <div className="content"><div className="muted">Loading…</div></div>;
+  if (loadError) return <div className="content"><LoadError what="this trade" message={loadError} /></div>;
   if (!t) return <div className="content"><Card><CardContent>Trade not found.</CardContent></Card></div>;
 
   const currency = t.trading_accounts?.currency;

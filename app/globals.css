@@ -304,9 +304,16 @@ code { background: var(--chip-bg); color: var(--text-dim); padding: 2px 6px; bor
 .grid > * { min-width: 0; }
 /* Column counts for the desktop layout — the media queries below only ever narrow these. */
 .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-/* A pair of cards that differ in height: each one ends where its content does, rather than
-   stretching to match its neighbour and leaving a dead half. */
-.grid.pair-grid { align-items: start; }
+/* A pair of cards that share one height. Each card is a column whose last block is pushed to the
+   bottom (`.pair-foot`), so the shorter one spends its extra height as breathing room in the middle
+   instead of ending in a ragged step beside its neighbour. */
+.grid.pair-grid { align-items: stretch; }
+.pair-card { display: flex; flex-direction: column; }
+.pair-card > .card-content { flex: 1; display: flex; flex-direction: column; }
+.pair-foot { margin-top: auto; padding-top: 16px; }
+/* A list that grows to fill the card, so an empty one still reads as a deliberate block. */
+.pair-list { flex: 1; display: flex; flex-direction: column; }
+.empty-inline { flex: 1; min-height: 0; margin-top: 16px; padding: 26px 16px; }
 .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .muted { color: var(--muted); }
@@ -485,6 +492,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 
 /* A card's own header: title and hint on the left, a summary pill on the right. */
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+/* Line breaking measures a flex item by its max-content width, so a long hint — “Zakat is normally
+   paid after the year closes…” — pushed the pill onto a row of its own. A small basis makes the
+   text block claim the leftover room and wrap inside itself instead, keeping the pill top-right. */
+.card-head > :first-child { flex: 1 1 220px; min-width: 0; }
 .card-hint { font-size: 11px; margin-top: 2px; }
 /* Two controls per row with a hint line under each, so nothing is clipped in a narrow column. */
 .field-grid { margin-top: 14px; row-gap: 14px; }
@@ -921,6 +932,8 @@ button.year-cell:disabled { cursor: default; }
 .ctl-alert { padding: 11px 13px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--tile); font-size: 12px; }
 .ctl-alert-title { font-weight: 700; }
 .ctl-alert-desc { margin-top: 3px; font-size: 11.5px; color: var(--text-dim); }
+/* A failed load reads as a notice above the page's own blocks, spaced like the grids are. */
+.load-error { margin-bottom: 14px; }
 
 /* --- dialog head ------------------------------------------------------------ */
 .dialog-header { display: grid; gap: 4px; }
@@ -961,6 +974,10 @@ button.year-cell:disabled { cursor: default; }
   /* A five-column breakdown table needs ~420px, so it pairs up only while a card can hold one
      and stacks full width below that instead of scrolling its P&L column out of sight. */
   .grid.two.breakdown-grid { grid-template-columns: minmax(0, 1fr); }
+  /* The zakat pair carries two field columns each: side by side below this they squeeze to ~300px
+     per card, the inputs drop to 126px and every hint wraps to three lines. Stacked, each card
+     keeps its own full width and the two-column field grid inside it stays comfortable. */
+  .grid.two.pair-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 1100px) {
   .grid.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }

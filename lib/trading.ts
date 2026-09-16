@@ -67,12 +67,39 @@ export const SESSION_WINDOWS: Record<string, string> = {
 /** Morning runs until the 12:30 close; anything opened later is an evening trade. */
 export const MORNING_CLOSE_MINUTES = 12 * 60 + 30;
 
+/**
+ * The journal is a Bursa Malaysia record, so the day, session and hour buckets a trade falls into
+ * are read in Malaysia time rather than the viewer's clock: a trade opened at 09:05 stays a morning
+ * trade after you fly to London. Malaysia has never used daylight saving, so the offset is a
+ * constant and no timezone database is needed.
+ */
+export const MY_TIME_ZONE = "Asia/Kuala_Lumpur";
+const MY_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+/** The Malaysia-time calendar fields of an instant, or null when the value is not a date. */
+export function myParts(value: string | Date | null | undefined) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  const shifted = new Date(date.getTime() + MY_OFFSET_MS);
+  const hours = shifted.getUTCHours();
+  const minutes = shifted.getUTCMinutes();
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+    hours,
+    minutes,
+    /** Minutes past midnight in Malaysia — what the session and hour buckets compare. */
+    minutesOfDay: hours * 60 + minutes,
+  };
+}
+
 /** The session a trade opened at `value` belongs to, by Malaysian local time. */
 export function sessionForTime(value?: string | Date | null): string {
-  if (!value) return SESSIONS[0];
-  const date = value instanceof Date ? value : new Date(value);
-  if (!Number.isFinite(date.getTime())) return SESSIONS[0];
-  return date.getHours() * 60 + date.getMinutes() < MORNING_CLOSE_MINUTES ? "Morning" : "Evening";
+  const parts = myParts(value);
+  if (!parts) return SESSIONS[0];
+  return parts.minutesOfDay < MORNING_CLOSE_MINUTES ? "Morning" : "Evening";
 }
 
 /** Session plus its exchange hours, e.g. "Morning · 9:00–12:30". Non-sessions pass through. */
@@ -117,11 +144,9 @@ export const HOUR_BUCKETS = [
 
 /** The clock hour a trade was opened in, by Malaysian local time. */
 export function hourBucket(entryAt?: string | null) {
-  if (!entryAt) return OUTSIDE_HOURS;
-  const date = new Date(entryAt);
-  if (!Number.isFinite(date.getTime())) return OUTSIDE_HOURS;
-  const hour = date.getHours();
-  return BURSA_HOURS.includes(hour) ? `${String(hour).padStart(2, "0")}:00` : OUTSIDE_HOURS;
+  const parts = myParts(entryAt);
+  if (!parts) return OUTSIDE_HOURS;
+  return BURSA_HOURS.includes(parts.hours) ? `${String(parts.hours).padStart(2, "0")}:00` : OUTSIDE_HOURS;
 }
 
 /** Which session an hour bucket sits in, or null for hours outside both windows. */
@@ -144,7 +169,9 @@ export function calculateRisk(entry: unknown, stop: unknown, size: unknown, expl
   const sl = numberOrNull(stop);
   const s = numberOrNull(size);
   if (e === null || sl === null || s === null || s <= 0) return null;
-  const risk = Math.abs(e - sl) * s;
+  // Rounded to sen like gross P&L: the column stores two decimals, so keeping the float here only
+  // makes the form disagree with what is saved (and with the R it derives from it).
+  const risk = roundMoney(Math.abs(e - sl) * s);
   return risk > 0 ? risk : null;
 }
 
@@ -233,7 +260,7 @@ export function shortDate(value?: string | null) {
   if (!value) return "—";
   const d = new Date(value);
   if (!Number.isFinite(d.getTime())) return "—";
-  return d.toLocaleDateString("en-MY", { day: "2-digit", month: "short", year: "numeric" });
+  return d.toLocaleDateString("en-MY", { day: "2-digit", month: "short", year: "numeric", timeZone: MY_TIME_ZONE });
 }
 
 /** Date and time for tables: "23 Jan 2025, 9:00 am". */
@@ -241,7 +268,7 @@ export function shortDateTime(value?: string | null) {
   if (!value) return "—";
   const d = new Date(value);
   if (!Number.isFinite(d.getTime())) return "—";
-  return `${shortDate(value)}, ${d.toLocaleTimeString("en-MY", { hour: "numeric", minute: "2-digit" })}`;
+  return `${shortDate(value)}, ${d.toLocaleTimeString("en-MY", { hour: "numeric", minute: "2-digit", timeZone: MY_TIME_ZONE })}`;
 }
 
 export function formatR(value: unknown) {
@@ -269,10 +296,14 @@ export function formatDuration(entry?: string | null, exit?: string | null) {
   return formatDurationMs(ms);
 }
 
-/** Local calendar day of a timestamp as "YYYY-MM-DD" — the key a day's trades share. */
+/**
+ * The Malaysian calendar day of a timestamp as "YYYY-MM-DD" — the key a day's trades share. An
+ * unreadable value returns "" so callers group it under nothing rather than under today.
+ */
 export function dayKey(value: string | Date) {
-  const d = value instanceof Date ? value : new Date(value);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const parts = myParts(value);
+  if (!parts) return "";
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
 
 /** "+0.18%" / "-1.20%" — a positive figure carries its sign so columns align. */
@@ -313,7 +344,11 @@ export function calculateStats(trades: Trade[]) {
   const grossProfit = wins.reduce((sum, t) => sum + Number(t.net_pnl), 0);
   const grossLoss = Math.abs(losses.reduce((sum, t) => sum + Number(t.net_pnl), 0));
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : null;
-  const avgR = trades.length ? trades.reduce((sum, t) => sum + Number(t.r_multiple || 0), 0) / trades.length : 0;
+  // A trade with no stop loss has no R multiple. Counting those blanks as zeroes would drag the
+  // average towards break-even, so the mean is taken over the trades that actually carry an R.
+  const rValues = trades.map(t => numberOrNull(t.r_multiple)).filter((r): r is number => r !== null);
+  const rSum = rValues.reduce((sum, r) => sum + r, 0);
+  const avgR = rValues.length ? rSum / rValues.length : null;
 
   let running = 0;
   let peak = 0;
@@ -326,7 +361,7 @@ export function calculateStats(trades: Trade[]) {
     const drawdown = running - peak;
     maxDrawdown = Math.min(maxDrawdown, drawdown);
     if (peak > 0) maxDrawdownPct = Math.max(maxDrawdownPct, Math.abs(drawdown) / peak * 100);
-    return { x: index + 1, date: new Date(t.entry_at).toLocaleDateString(), pnl: Number(running.toFixed(2)), drawdown: Number(drawdown.toFixed(2)) };
+    return { x: index + 1, date: shortDate(t.entry_at), pnl: Number(running.toFixed(2)), drawdown: Number(drawdown.toFixed(2)) };
   });
 
   return {
@@ -340,6 +375,9 @@ export function calculateStats(trades: Trade[]) {
     profitFactor,
     expectancyR: avgR,
     avgR,
+    /** How many trades carry an R multiple — the denominator `avgR` was taken over. */
+    rCount: rValues.length,
+    rSum: roundMoney(rSum),
     maxDrawdown: Math.abs(maxDrawdown),
     maxDrawdownPct,
     equity,
@@ -363,11 +401,12 @@ export type MetricSeries = {
 export function metricSeries(trades: Trade[]): MetricSeries {
   const out: MetricSeries = { equity: [], winRate: [], profitFactor: [], avgR: [], grossProfit: [], grossLoss: [], drawdown: [] };
   const ordered = [...trades].sort((a, b) => a.entry_at.localeCompare(b.entry_at));
-  let pnl = 0, wins = 0, grossProfit = 0, grossLoss = 0, rSum = 0, peak = 0;
+  let pnl = 0, wins = 0, grossProfit = 0, grossLoss = 0, rSum = 0, rCount = 0, peak = 0;
   ordered.forEach((trade, index) => {
     const net = Number(trade.net_pnl || 0);
     pnl += net;
-    rSum += Number(trade.r_multiple || 0);
+    const r = numberOrNull(trade.r_multiple);
+    if (r !== null) { rSum += r; rCount += 1; }
     if (net > 0) { wins += 1; grossProfit += net; }
     else if (net < 0) grossLoss += net; // kept negative, like the Gross Loss card
     peak = Math.max(peak, pnl);
@@ -376,7 +415,9 @@ export function metricSeries(trades: Trade[]): MetricSeries {
     out.grossProfit.push(roundMoney(grossProfit));
     out.grossLoss.push(roundMoney(grossLoss));
     out.drawdown.push(roundMoney(pnl - peak));
-    out.avgR.push(Number((rSum / (index + 1)).toFixed(4)));
+    // Until a trade carries a stop loss there is no ratio to plot; the series holds 0 so every
+    // sparkline still has one point per trade.
+    out.avgR.push(rCount ? Number((rSum / rCount).toFixed(4)) : 0);
     // Before the first losing trade there is no ratio to compute, so the profit side tracks instead.
     out.profitFactor.push(Number((grossLoss < 0 ? grossProfit / Math.abs(grossLoss) : grossProfit).toFixed(4)));
   });
@@ -414,7 +455,7 @@ export type DaySummary = {
 
 export function dailySummaries(trades: Trade[]): DaySummary[] {
   const ordered = [...trades].sort((a, b) => a.entry_at.localeCompare(b.entry_at));
-  const map = new Map<string, DaySummary & { peak: number; running: number; holdMs: number; held: number }>();
+  const map = new Map<string, DaySummary & { peak: number; running: number; holdMs: number; held: number; rCount: number }>();
   let cumulative = 0;
 
   ordered.forEach(trade => {
@@ -427,7 +468,7 @@ export function dailySummaries(trades: Trade[]): DaySummary[] {
         grossProfit: 0, grossLoss: 0, profitFactor: null, winRate: 0, expectancy: 0, rSum: 0, avgR: null,
         drawdown: 0, best: null, worst: null, avgHoldMs: null,
         // Everything earned before this day opened — the balance the day started from.
-        equityBefore: cumulative, peak: 0, running: 0, holdMs: 0, held: 0,
+        equityBefore: cumulative, peak: 0, running: 0, holdMs: 0, held: 0, rCount: 0,
       };
       map.set(key, day);
     }
@@ -442,7 +483,7 @@ export function dailySummaries(trades: Trade[]): DaySummary[] {
     if (day.best === null || net > Number(day.best.net_pnl || 0)) day.best = trade;
     if (day.worst === null || net < Number(day.worst.net_pnl || 0)) day.worst = trade;
     const r = numberOrNull(trade.r_multiple);
-    if (r !== null) day.rSum += r;
+    if (r !== null) { day.rSum += r; day.rCount += 1; }
     if (trade.exit_at) {
       const held = new Date(trade.exit_at).getTime() - new Date(trade.entry_at).getTime();
       if (Number.isFinite(held) && held >= 0) { day.holdMs += held; day.held += 1; }
@@ -453,14 +494,15 @@ export function dailySummaries(trades: Trade[]): DaySummary[] {
     cumulative = roundMoney(cumulative + net);
   });
 
-  return [...map.values()].map(({ peak, running, holdMs, held, ...day }) => ({
+  return [...map.values()].map(({ peak, running, holdMs, held, rCount, ...day }) => ({
     ...day,
     symbols: new Set(day.trades.map(t => t.symbol)).size,
     gross: roundMoney(day.pnl + day.charges),
     winRate: day.count ? day.wins / day.count * 100 : 0,
     profitFactor: day.grossLoss > 0 ? day.grossProfit / day.grossLoss : null,
     expectancy: day.count ? day.pnl / day.count : 0,
-    avgR: day.count && day.trades.some(t => numberOrNull(t.r_multiple) !== null) ? day.rSum / day.count : null,
+    // The day's mean R is over its trades with a stop loss, not over all of them.
+    avgR: rCount ? day.rSum / rCount : null,
     avgHoldMs: held ? holdMs / held : null,
   }));
 }
@@ -552,17 +594,16 @@ export function zakatForYear(trades: Trade[], input: ZakatInput) {
   return { trades: trades.length, net: roundMoney(net), wins: roundMoney(wins), other: roundMoney(other), base, rate, nisab, computed, due: belowNisab ? 0 : computed, belowNisab };
 }
 
-/** The calendar year a trade was opened in, by local time. */
+/** The calendar year a trade was opened in, by Malaysian local time. */
 export function tradeYear(entryAt?: string | null) {
-  const d = new Date(String(entryAt ?? ""));
-  return Number.isFinite(d.getTime()) ? d.getFullYear() : null;
+  return myParts(entryAt)?.year ?? null;
 }
 
 /** Every year present in the journal, newest first. */
 export function tradeYears(trades: Trade[]) {
   const years = new Set<number>();
   trades.forEach(t => { const y = tradeYear(t.entry_at); if (y) years.add(y); });
-  years.add(new Date().getFullYear());
+  years.add(myParts(new Date())!.year);
   return [...years].sort((a, b) => b - a);
 }
 
@@ -581,16 +622,22 @@ export function bestStreak(trades: Trade[], winning: boolean) {
   return best;
 }
 
+/**
+ * An instant as the "YYYY-MM-DDTHH:mm" wall clock a trade form edits, read in Malaysia time — so the
+ * time you type and the time the journal shows mean the same thing wherever the app is opened.
+ */
 export function toLocalDatetimeInput(value?: string | null) {
-  if (!value) return "";
-  const d = new Date(value);
-  if (!Number.isFinite(d.getTime())) return "";
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0,16);
+  const parts = myParts(value);
+  if (!parts) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hours)}:${pad(parts.minutes)}`;
 }
 
+/** The reverse: a Malaysian wall clock string, stored as the instant it names. */
 export function localDatetimeToIso(value?: string | null) {
-  if (!value) return null;
-  const d = new Date(value);
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(value ?? "");
+  if (!m) return null;
+  // Malaysia is UTC+8 all year, so the wall clock minus eight hours is the instant it names.
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] ?? 0) - 8, Number(m[5] ?? 0)));
   return Number.isFinite(d.getTime()) ? d.toISOString() : null;
 }

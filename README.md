@@ -1,3 +1,21 @@
+## Phase 12
+
+An external audit of this project came back with 40 findings; this phase answers them one by one.
+**Nine were real and are fixed**, including two that changed numbers you read every day: **Average R
+was dividing by every trade instead of the trades that have a stop** (with 1 of 209 trades carrying
+one, the dashboard reported ≈ +0.01R instead of +1.53R), and **"Current Equity" was adding a
+*filtered* P&L to the account's starting balance**. Max Drawdown is now quoted against capital
+(`18.8% of RM 11,000`) instead of against the P&L peak it used to report as `1999.5%`. A failed query
+no longer renders as an empty journal — every page names the error and suppresses its own blocks —
+and the whole day/session/hour axis now runs on **Malaysia time** rather than the viewer's clock,
+including the date fields, which fixes "today" being yesterday before 08:00. `next.config.ts` adds
+security headers; the auth callback reports a failed exchange. `supabase/hardening.sql` is **new and
+needs running once**: it makes "this trade's account belongs to me" a database constraint (a
+composite foreign key), constrains the columns the app already assumes, sets the storage bucket's own
+size and MIME limits, and adds indexes for the journal's reads. `npm run test:calc` adds 77
+calculation checks (`npm test` runs them with the fee checks). See `PHASE12.md`, which also records
+the eleven findings that were **not** what they claimed, and why.
+
 ## Phase 11
 
 Every date field in the app is now its own control — a `react-day-picker` month grid in a Radix
@@ -60,10 +78,20 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-or-publishable-key
 ```
 Only the anon/publishable key is used — every table is guarded by per-user RLS, so the app never needs
 a service-role key.
+Then run `supabase/hardening.sql` **once** (Phase 12). It adds the ownership constraints, the
+column-level checks, the storage bucket's size and MIME limits and the journal's indexes. Everything
+in it is `NOT VALID`, so no historic row is rejected, and it is safe to re-run.
+
 Then:
 ```bash
 npm install
 npm run dev
+```
+
+```bash
+npm test        # fee engine + 77 calculation checks
+npm run typecheck
+npm run build
 ```
 
 Screenshot paths are stored as `<user_id>/<trade_id>/<uuid>-filename`; the app only creates short-lived signed URLs after checking the user's authenticated session.

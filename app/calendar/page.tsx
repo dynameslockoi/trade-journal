@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { LoadError, firstError } from "@/components/load-error";
 import { StatCard } from "@/components/stat-card";
 import { CalendarDayModal } from "@/components/calendar-day-modal";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,7 @@ export default function CalendarPage() {
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState<DaySummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // So a click in the year strip below can bring the month it opens back into view.
   const monthCard = useRef<HTMLDivElement>(null);
 
@@ -57,6 +59,7 @@ export default function CalendarPage() {
           .order("entry_at"),
         s.from("trading_accounts").select("id,name,starting_balance,currency").order("name"),
       ]);
+      setLoadError(firstError(t, a));
       setTrades(((t.data ?? []) as any[]).map(normalizeTrade));
       setAccounts((a.data ?? []) as Account[]);
       setLoading(false);
@@ -133,7 +136,8 @@ export default function CalendarPage() {
       subtitle="Daily realised P&L, trade count and return on capital."
       actions={<Button variant="secondary" onClick={today}>Today</Button>}
     />
-    {loading ? <Card><CardContent>Loading calendar…</CardContent></Card> : <>
+    <LoadError message={loadError} what="your calendar" />
+    {loadError ? null : loading ? <Card><CardContent>Loading calendar…</CardContent></Card> : <>
       <div className="grid four">
         <StatCard label="Month P&L" value={formatMoney(monthPnl, currency, true)} positive={monthPnl >= 0}
           sub={monthPct === null ? "No starting capital set" : `${formatPercent(monthPct)} of capital`} />
