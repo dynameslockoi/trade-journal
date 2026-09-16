@@ -1133,6 +1133,49 @@ button.year-cell:disabled, button.ss-cell:disabled { cursor: default; }
 /* --- sonner (toasts) -------------------------------------------------------- */
 [data-sonner-toaster] { --normal-bg: var(--panel); --normal-border: var(--border); --normal-text: var(--text); font-family: var(--font-sans); }
 
+/* --- admin (the operations page) -------------------------------------------- */
+/* Status badges: the same three tones the P&L figures use, so "blocked" reads the way a loss does. */
+.badge-ok { border-color: var(--success-border); background: var(--success-bg); color: var(--success-text); }
+.badge-warn { border-color: var(--ipo-border); background: var(--ipo-bg); color: var(--ipo-text); }
+.badge-danger { border-color: var(--danger-border); background: var(--danger-bg); color: var(--danger-text); }
+.admin-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.admin-search { width: 230px; max-width: 100%; }
+/* The account column is the one cell allowed to wrap: an email is longer than any figure beside it,
+   and nowrap would push the columns it lines up with off the edge of the card. */
+td.admin-account { white-space: normal; min-width: 210px; }
+.admin-account b { display: block; }
+.admin-account > .muted { font-size: 11px; }
+.admin-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
+.admin-tags .muted { font-size: 9.5px; }
+/* A second line under a figure — "last traded", "ended 3 days ago" — set back so the first line
+   still reads as the answer. */
+.admin-note { color: var(--text-faint); font-size: 10.5px; white-space: normal; }
+.admin-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px; letter-spacing: 0.08em; color: var(--text);
+  background: var(--chip-bg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 3px 7px;
+}
+.admin-copy { margin-left: 5px; color: var(--chip-icon); vertical-align: middle; }
+.admin-copy:hover { color: var(--accent); }
+.admin-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+/* The creator is a row on a desktop — every field is short — and two columns once the buttons would
+   otherwise be squeezed against the fields. */
+.admin-create {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.5fr) 88px minmax(140px, 1fr) minmax(160px, 1.5fr) auto;
+  gap: 10px; align-items: end; margin-top: 16px;
+}
+@media (max-width: 1000px) {
+  .admin-create { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-create .self-end { grid-column: 1 / -1; }
+}
+@media (max-width: 700px) {
+  .admin-toolbar { width: 100%; }
+  .admin-search { flex: 1 1 100%; width: 100%; }
+  .admin-create { grid-template-columns: 1fr; }
+  .admin-actions { justify-content: flex-start; }
+}
+
 /* ================================================================ responsive */
 @media (max-width: 1350px) {
   /* Four metric cards get cramped with sparklines on a laptop, so they pair up earlier. The

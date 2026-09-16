@@ -12,8 +12,10 @@ import {
   LayoutDashboard,
   MoreHorizontal,
   Settings,
+  ShieldCheck,
   Target,
   WalletCards,
+  type LucideIcon,
 } from "lucide-react";
 import {
   Sheet,
@@ -24,7 +26,9 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-export const NAV_ITEMS = [
+export type NavItem = readonly [string, string, LucideIcon];
+
+export const NAV_ITEMS: readonly NavItem[] = [
   ["/", "Dashboard", LayoutDashboard],
   ["/journal", "Journal", BookOpen],
   ["/analytics", "Analytics", BarChart3],
@@ -35,14 +39,24 @@ export const NAV_ITEMS = [
   ["/reviews", "Reviews", Brain],
   ["/zakat", "Zakat", HandCoins],
   ["/settings", "Settings", Settings],
-] as const;
+];
+
+/**
+ * Shown only to an admin. It is a separate list because `NAV_ITEMS` is what every visitor navigates by:
+ * a customer should not see a link to a page about other customers, even one that would refuse them.
+ */
+export const ADMIN_ITEM: NavItem = ["/admin", "Admin", ShieldCheck];
+
+/** Every section a page title or an active highlight can name — the sidebar, plus admin. */
+export const SECTION_ITEMS: readonly NavItem[] = [...NAV_ITEMS, ADMIN_ITEM];
 
 /** Nested routes (/journal/new, /journal/<id>) keep their section highlighted. */
 export const isActive = (path: string, href: string) =>
   href === "/" ? path === "/" : path === href || path.startsWith(`${href}/`);
 
-export function Sidebar() {
+export function Sidebar({ isAdmin }: { isAdmin?: boolean }) {
   const path = usePathname();
+  const items = isAdmin ? SECTION_ITEMS : NAV_ITEMS;
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -51,7 +65,7 @@ export function Sidebar() {
       </div>
       <div className="section-label">Workspace</div>
       <nav>
-        {NAV_ITEMS.map(([href, label, Icon]) => (
+        {items.map(([href, label, Icon]) => (
           <Link key={href} href={href} className={cn("nav-item", isActive(path, href) && "active")}>
             <Icon size={17} />
             <span className="nav-text">{label}</span>
@@ -69,13 +83,14 @@ const PRIMARY_HREFS: readonly string[] = ["/journal", "/analytics", "/calendar"]
  * Phone navigation: a fixed bottom bar for the daily destinations plus a **More** button that opens
  * the entire section list in a sheet — which beats scrolling ten icons sideways along the bottom.
  */
-export function MobileNav() {
+export function MobileNav({ isAdmin }: { isAdmin?: boolean }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
+  const items = isAdmin ? SECTION_ITEMS : NAV_ITEMS;
 
   const [homeHref, homeLabel, HomeIcon] = NAV_ITEMS[0];
-  const primary = NAV_ITEMS.filter(([href]) => PRIMARY_HREFS.includes(href));
-  const rest = NAV_ITEMS.filter(([href]) => href !== "/" && !PRIMARY_HREFS.includes(href));
+  const primary = items.filter(([href]) => PRIMARY_HREFS.includes(href));
+  const rest = items.filter(([href]) => href !== "/" && !PRIMARY_HREFS.includes(href));
   const moreActive = rest.some(([href]) => isActive(path, href));
 
   return (
@@ -114,7 +129,7 @@ export function MobileNav() {
           </SheetHeader>
           <div className="section-label">Workspace</div>
           <nav className="nav-sheet">
-            {NAV_ITEMS.map(([href, label, Icon]) => (
+            {items.map(([href, label, Icon]) => (
               <Link
                 key={href}
                 href={href}

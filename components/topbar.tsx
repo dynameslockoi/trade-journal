@@ -3,11 +3,14 @@
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/user-menu";
-import { NAV_ITEMS } from "@/components/sidebar";
+import { SECTION_ITEMS } from "@/components/sidebar";
 
-/** Title of the deepest nav section the current path belongs to. */
+/**
+ * Title of the deepest nav section the current path belongs to. Every section counts here, admin
+ * included — a title is not a link, and the admin page should not read "Dashboard".
+ */
 function sectionFor(path: string) {
-  const matches = NAV_ITEMS.filter(([href]) => href !== "/" && (path === href || path.startsWith(`${href}/`)));
+  const matches = SECTION_ITEMS.filter(([href]) => href !== "/" && (path === href || path.startsWith(`${href}/`)));
   if (matches.length) return matches.reduce((a, b) => (b[0].length > a[0].length ? b : a))[1];
   return "Dashboard";
 }

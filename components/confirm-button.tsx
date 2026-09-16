@@ -28,6 +28,7 @@ export function ConfirmButton({
   variant = "destructive",
   size,
   className,
+  disabled,
 }: {
   children: React.ReactNode;
   title: string;
@@ -37,11 +38,23 @@ export function ConfirmButton({
   variant?: "default" | "secondary" | "outline" | "ghost" | "destructive" | "link";
   size?: "default" | "sm" | "lg" | "icon";
   className?: string;
+  /**
+   * For a confirmation the database would refuse anyway. A button that can only ever raise an error
+   * is worse than a greyed-out one: it invites a click and then reports a rule the page already knew.
+   */
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button type="button" variant={variant} size={size} className={className} onClick={() => setOpen(true)}>
+      <Button
+        type="button"
+        variant={variant}
+        size={size}
+        className={className}
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+      >
         {children}
       </Button>
       <AlertDialog open={open} onOpenChange={setOpen}>

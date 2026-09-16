@@ -30,7 +30,37 @@ import { useEffect, useRef, useState } from "react";
 /** How long an answer counts as fresh: long enough to cover a walk around the app. */
 const DEFAULT_TTL = 60_000;
 
-type Entry = { data: unknown; at: number; error?: string | null; promise?: Promise<void> };
+/**
+ * How long a failed key waits before it is asked again.
+ *
+ * A failure has to notify — a page sitting on a spinner needs to hear that the read failed — and the
+ * components listening to a key re-run their fetch when they are notified. Without a window those two
+ * facts multiply: the failure notifies, the listener asks again, that fails, and the page becomes a
+ * request loop against an endpoint that is not going to change its answer. Five seconds is short
+ * enough that a dropped connection recovers on its own and long enough that it is not a loop.
+ */
+const RETRY_AFTER = 5_000;
+
+/**
+ * Throw this from a loader when asking again cannot help — the function or table is not in the
+ * database at all. Such a failure stands until something invalidates it or the page is reloaded,
+ * rather than being retried against an endpoint that will keep saying no.
+ */
+export class PermanentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PermanentError";
+  }
+}
+
+type Entry = {
+  data: unknown;
+  at: number;
+  error?: string | null;
+  promise?: Promise<void>;
+  /** When this failed key may be asked again. Absent while it is healthy. */
+  retryAt?: number;
+};
 
 const store = new Map<string, Entry>();
 const listeners = new Map<string, Set<() => void>>();
@@ -77,8 +107,10 @@ export function invalidate(prefix = "") {
     const entry = store.get(key);
     if (!entry) continue;
     // Dropping the in-flight marker lets a request that is already running be superseded: without it
-    // the write's fresh read would share the request that left before the write.
-    const { promise: _running, ...held } = entry;
+    // the write's fresh read would share the request that left before the write. The back-off goes
+    // with it, so the invalidation after a write is also the retry — which is what the admin page's
+    // Refresh button relies on.
+    const { promise: _running, retryAt: _retry, ...held } = entry;
     store.set(key, { ...held, at: 0 });
     notify(key);
   }
@@ -100,6 +132,9 @@ export function clear() {
 function ensure<T>(key: string, fetcher: () => Promise<T>, ttl: number): Promise<void> {
   const existing = store.get(key);
   if (existing?.promise) return existing.promise;
+  // Inside the back-off window this is a no-op: no request, and no notification either, so the
+  // listener that called it settles instead of asking again.
+  if (existing?.error && existing.retryAt && Date.now() < existing.retryAt) return Promise.resolve();
 
   const token = ++seq;
   tokens.set(key, token);
@@ -117,7 +152,12 @@ function ensure<T>(key: string, fetcher: () => Promise<T>, ttl: number): Promise
       const held = store.get(key);
       const message = e instanceof Error ? e.message : String(e);
       // `at: 0` marks a failure: present for the error message, stale on purpose.
-      store.set(key, { data: held?.data ?? null, at: 0, error: message });
+      store.set(key, {
+        data: held?.data ?? null,
+        at: 0,
+        error: message,
+        retryAt: e instanceof PermanentError ? Number.POSITIVE_INFINITY : Date.now() + RETRY_AFTER,
+      });
     })
     .finally(() => {
       const held = store.get(key);

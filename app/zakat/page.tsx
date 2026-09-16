@@ -205,7 +205,9 @@ export default function ZakatPage() {
 
         <div className="grid four">
           <StatCard label={`${year} Net P&L`} value={formatMoney(result.net, currency, true)} sub={`${result.trades} trade${result.trades === 1 ? "" : "s"} closed`} positive={result.net >= 0} />
-          <StatCard label="Zakatable Base" value={formatMoney(result.base, currency)} sub={basisHint} />
+          {/* A year that lost money has a negative base: it reads as the loss it is, in the same red
+              as the net card beside it rather than as a neutral figure. */}
+          <StatCard label="Zakatable Base" value={formatMoney(result.base, currency)} sub={basisHint} positive={result.base >= 0} />
           <StatCard label={`Zakat at ${result.rate}%`} value={formatMoney(result.due, currency)} sub={result.belowNisab ? `below nisab ${formatMoney(result.nisab, currency)} — nothing due` : `${result.rate}% of the base`} />
           <StatCard label="Already Paid" value={formatMoney(paid, currency)} sub={balance > 0 ? `${formatMoney(balance, currency)} still to pay` : balance < 0 ? `${formatMoney(-balance, currency)} paid over` : "settled"} positive={balance <= 0 ? true : undefined} />
         </div>

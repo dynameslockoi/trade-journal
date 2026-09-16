@@ -2,7 +2,12 @@
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { warmData } from "@/lib/data";
+import { KEYS, warmData } from "@/lib/data";
+import { loadMe, type Me } from "@/lib/admin";
+import { accessState } from "@/lib/access";
+import { useCachedQuery } from "@/lib/query-cache";
+import { toISODate, today as todayInMalaysia } from "@/lib/dates";
+import { AccessDenied } from "@/components/access-denied";
 import { QuickAdd } from "@/components/quick-add";
 import { MobileNav, Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
@@ -14,6 +19,20 @@ const standaloneRoutes = ["/login", "/signup"];
 
 export function AppShell({ email, name, children }: { email: string; name?: string; children: React.ReactNode }) {
   const path = usePathname();
+  const standalone = standaloneRoutes.includes(path);
+
+  /**
+   * Whether this account may use the journal, and whether it may see the Admin page.
+   *
+   * One read per session, through the same cache every page uses, so it costs nothing on a
+   * navigation. `enabled` keeps it off the sign-in screens, where there is no session to ask about.
+   * A failure is deliberately *not* a block: if the read errors — the access functions not deployed
+   * yet, say — `accessState(null)` allows the page through, because locking the owner out of their own
+   * journal over a missing migration would be worse than letting a suspended account reload once.
+   */
+  const me = useCachedQuery<Me | null>(KEYS.me, loadMe, { enabled: !standalone && Boolean(email) });
+  const access = accessState(me.data, toISODate(todayInMalaysia()));
+  const isAdmin = Boolean(me.data?.is_admin);
 
   /**
    * Read the pages behind the links before they are clicked.
@@ -24,7 +43,6 @@ export function AppShell({ email, name, children }: { email: string; name?: stri
    * matters: this sits above the standalone-route return so login pages skip it, mounted as a
    * sibling so it never renders anything.
    */
-  const standalone = standaloneRoutes.includes(path);
   useEffect(() => {
     if (standalone) return;
     // `requestIdleCallback` keeps the warm-up behind whatever the user is actually reading; the
@@ -39,16 +57,17 @@ export function AppShell({ email, name, children }: { email: string; name?: stri
   }, [standalone]);
 
   if (standalone) return <>{children}</>;
+  if (!access.ok) return <AccessDenied state={access} email={email} />;
   return (
     <TooltipProvider delayDuration={300}>
       <div className="shell">
-        <Sidebar />
+        <Sidebar isAdmin={isAdmin} />
         <main className="main">
           <Topbar email={email} name={name} />
           {children}
           <QuickAdd />
         </main>
-        <MobileNav />
+        <MobileNav isAdmin={isAdmin} />
       </div>
       <Toaster />
     </TooltipProvider>

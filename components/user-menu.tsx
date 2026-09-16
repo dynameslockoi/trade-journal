@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { LogOut, UserRound } from "lucide-react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { clear } from "@/lib/query-cache";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,13 @@ import { Button } from "@/components/ui/button";
  */
 export function UserMenu({ email, name }: { email: string; name?: string }) {
   async function signout() {
-    await createClient().auth.signOut();
+    // A sign-out that failed leaves the session live: sending the browser to the login page anyway
+    // would look like it worked while the next request walked straight back in.
+    const { error } = await createClient().auth.signOut();
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
     // The cached rows belong to the session that just ended.
     clear();
     window.location.href = "/login";

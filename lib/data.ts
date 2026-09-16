@@ -20,6 +20,10 @@ import { preload } from "@/lib/query-cache";
 
 /** Cache keys. Reviews are per date, everything else is one row set per table. */
 export const KEYS = {
+  /** The signed-in account's own access state, read once per session by the shell and the admin page. */
+  me: "me",
+  /** The admin page's single read of every account and invitation code. */
+  admin: "admin",
   trades: "trades",
   accounts: "accounts",
   strategies: "strategies",

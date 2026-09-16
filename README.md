@@ -45,6 +45,12 @@ through `/auth/callback`, which exchanges the code for a session. A display name
 profile and shown in the top bar. Every page except the auth pages requires a session, and the
 middleware keeps the session cookie fresh on every request.
 
+**Sign-up is invitation only.** A code is required, and it is checked by the database rather than by the
+form — a trigger on `auth.users` refuses an account that arrives without a usable code, so posting
+straight to the auth API does not get around it. Codes are stored as upper-case letters and digits, so
+the dashes and capitals they were written with do not matter. Who is allowed in, and which codes exist,
+is the **Admin** page below.
+
 ### Dashboard (`/`)
 
 The state of your account at a glance: **Net P&L**, **Win Rate**, **Profit Factor** and **Expectancy**
@@ -166,6 +172,37 @@ A floating **Add trade** button sits at the bottom-right of every workspace page
 and pressing **N** opens the new-trade form — unless the caret is in a field, so typing an `n` in your
 notes does not open a form.
 
+### Admin (`/admin`) — the page customers never see
+
+This is for the install that is sold to other people: **who is using it, and who may still get in**. The
+sidebar link only exists for an admin, and the page refuses everyone else.
+
+- **Accounts** — every account with when it joined, whether it can sign in, how many trades it has logged
+  and when it last traded, plus the invitation code it came in on. It is **counts and dates only**: the
+  function behind it returns no trade rows at all, because running a business on top of other people's
+  journals does not require reading their P&L.
+- **Access is a switch, not a subscription.** Each account is *active* or *suspended*, optionally with an
+  **end date**. A date in the past locks the account out on its own, so a fixed term needs nothing to run
+  when it expires — there is no plan table, no renewal job and no billing webhook to keep alive.
+- **Invitation codes** — create one (typed, or generated with one click), give it a note, a number of uses
+  and an end date, and see which accounts used it. *Switching a code off* is how you stop a shared code
+  going further; the accounts it already created keep pointing at it.
+- **Nothing gets deleted.** A suspension is reversible from this page, and an account's data is untouched
+  while it is locked.
+
+A suspended or expired account does not merely get a warning: the shell renders a full stop instead of the
+journal, and the sign-in page refuses the account too. The check costs nothing on a navigation; it is one
+cached read per session, the same one that decides whether the Admin link exists.
+
+**The database enforces it as well.** Closing the app is not enough on its own — Supabase Auth knows
+nothing about your `profiles` table, so a switched-off customer could sign in again with the password they
+already have and read and write their whole journal through the API, while every policy in the project
+asked only whether a row was theirs. `supabase/access.sql` adds `is_active()` and puts it into every
+policy that hands out a row, tables and the screenshot bucket alike, so a suspended or expired account is
+refused by Postgres itself. An admin is always allowed, and a missing profile row is treated as allowed,
+because failing closed would turn a database that has not had `admin.sql` run yet into an empty journal
+for everyone on it.
+
 ---
 
 ## How the numbers work
@@ -222,7 +259,7 @@ opened at 00:30 on 1 September is a September trade rather than an August one.
 
 ### 2. Create the database
 
-In your Supabase project, open the **SQL editor** and run these four files from `supabase/`, **in this
+In your Supabase project, open the **SQL editor** and run these six files from `supabase/`, **in this
 order**. Each one is written to be re-runnable, so a second run is harmless:
 
 | File | What it creates |
@@ -231,9 +268,23 @@ order**. Each one is written to be re-runnable, so a second run is harmless:
 | `supabase/hardening.sql` | The same-owner composite keys (so a trade cannot reference someone else's account), the shape constraints on session/symbol/side, the storage size and MIME limits (10 MB; PNG/JPEG/WEBP/GIF). Constraints are added `NOT VALID`, so your existing rows are never rejected. |
 | `supabase/sectors.sql` | `trades.sector` and its index, for the sector column, filter, charts and the sentiment strip. |
 | `supabase/cashflow.sql` | `account_cash_flows` — one row per deposit or withdrawal — and seeds each account's existing opening balance as its first deposit. |
+| `supabase/admin.sql` | Invitation-only signup (`invite_codes` plus the trigger that enforces it), the access columns on `profiles` (`is_admin`, `status`, `access_until`, `note`, `invite_code`), the admin-only functions the Admin page calls, and a guard that stops a signed-in account writing those columns to its own row. |
+| `supabase/access.sql` | **Run this last.** Adds `is_active()` and puts it into every policy that hands out a row — tables *and* the screenshot bucket — so a suspended or expired account is refused by Postgres, not only by the app. |
+
+Two notes on `admin.sql`, both easy to miss:
+
+- **Promote yourself.** The file ends with a single commented `update` that gives your own account the
+  admin flag. Replace the placeholder address and run that one statement, or the Admin page will tell you
+  it is not set up. On a brand-new install the first account is promoted automatically, but a database
+  that already has profiles needs the statement.
+- **Run it again if you re-run `schema.sql`.** That file recreates the new-user trigger without the code
+  check, which would quietly reopen signups. `schema.sql` also recreates the per-user policies without
+  the access clause, so re-run `access.sql` after it for the same reason.
 
 Nothing in the app depends on a service-role key; the browser talks to Postgres with the anon key and is
-constrained by RLS.
+constrained by RLS. The admin reads and writes go through `security definer` functions that check
+`is_admin()` first, so a customer's browser can no more read another account than it can read another
+journal.
 
 ### 3. Point Supabase Auth at your app
 
@@ -268,15 +319,25 @@ npm run dev          # http://localhost:3000
 Open the app, **create an account**, confirm the email, sign in — and log your first trade. There is no
 seed data: the journal is empty until you use it.
 
+With `admin.sql` in place you cannot create that first account until a code exists, so **create your own
+code first**, in the SQL editor:
+
+```sql
+insert into public.invite_codes(code, note) values ('MYFIRSTCODE', 'me');
+```
+
+Sign up with it, run the promotion statement at the end of `admin.sql`, and the **Admin** item appears in
+the sidebar.
+
 ### 6. Verify the install
 
 ```bash
 npm run typecheck    # tsc --noEmit, 0 errors expected
-npm test             # fee model + calculation checks, all hand-worked
+npm test             # fee model, calculations, access rules, and the SQL run for real
 ```
 
 Then, in the app: add an account with an opening balance, record a trade, and check that the Accounts page
-shows it under *Movements*. If a page reports a missing column, one of the four SQL files above has not
+shows it under *Movements*. If a page reports a missing column, one of the five SQL files above has not
 been run yet — the app degrades instead of breaking, and says which script it wants.
 
 ### 7. Deploy
@@ -317,8 +378,8 @@ paints its cards and trades before the few hundred kilobytes of charting code ar
 
 ## Checks
 
-`npm test` runs two hand-worked check scripts, both of which exist because a plausible wrong number is
-worse than a crash:
+`npm test` runs four check scripts, all of which exist because a plausible wrong number — or a rule that
+quietly stopped applying — is worse than a crash:
 
 - **`scripts/fee-check.mts`** — the published broker schedules (M+ worked examples, Moomoo's platform
   fee, the tariff boundaries and stamp-duty caps), the tiered/intraday rates, the IPO subscription maths
@@ -326,6 +387,19 @@ worse than a crash:
   broker's charges and the market's.
 - **`scripts/calc-check.mts`** — gross P&L, risk, R formatting, percentages, holding-time buckets, and the
   Malaysian-time day/month boundaries including leap Februaries.
+- **`scripts/admin-check.mts`** — the access rules: code normalising, generated codes, an inclusive end
+  date, suspension outranking an end date, an admin that cannot be locked out, and what a used, expired or
+  switched-off code reads as. It also reads `supabase/admin.sql` and asserts the parts that would fail
+  silently — that the code normalisation the form uses is the one the database uses, and that the guard
+  which stops a customer promoting themselves is still there and still not `security definer`.
+- **`scripts/sql-check.mjs`** — runs `schema.sql`, `admin.sql`, `cashflow.sql` and `access.sql` against a
+  real Postgres (PGlite, in WASM) inside a fake Supabase environment, then tries to break in: sign up
+  with no code, reuse a spent one, promote myself, extend my own access, read the admin overview as a
+  customer. It is the only check that executes SQL at all, and it caught a bug on its first run.
+  It then walks the access gate from both sides — a suspended and an expired account refused on every
+  table and on the screenshot bucket, and an ordinary account still able to save a trade, a tag, a
+  review, a payment and a picture — because a wrong turn in that clause would not be a hole, it would
+  be everybody's journal going empty.
 
 ---
 
@@ -337,20 +411,23 @@ app/                      routes (App Router)
   auth/callback, signout  session exchange and sign-out
   page.tsx                dashboard
   journal/                list, new, [id] detail, [id]/edit
-  analytics, calendar, accounts, strategies, tags, reviews, zakat, settings
+  analytics, calendar, accounts, strategies, tags, reviews, zakat, settings, admin
 components/               shared UI: shell, sidebar, filter bar, stat cards, sparkline,
-                          screenshots (input + gallery), sector tools, quick add, IPO fieldset
+                          screenshots (input + gallery), sector tools, quick add, IPO fieldset,
+                          access-denied
 components/ui/            shadcn/ui primitives on Radix + Tailwind
 lib/
   data.ts                 one cached loader per row set, plus the cache keys
   query-cache.ts          the client cache: TTL, de-duped requests, invalidation
+  admin.ts                the admin RPCs: me(), the overview, access and invitation writes
+  access.ts               who may sign in, and which invitation codes still work
   fees.ts                 the Bursa cost model and the IPO subscription model
   trading.ts              trade types, filters, stats, grouping, dates, zakat
   dates.ts                Malaysian-time helpers
   supabase/               browser, server and middleware clients
   utils.ts                cn()
-supabase/                 the four SQL files to run, in order
-scripts/                  the fee and calculation check scripts
+supabase/                 the five SQL files to run, in order
+scripts/                  the fee, calculation, access and SQL check scripts
 middleware.ts             keeps the Supabase session fresh
 next.config.ts            security headers
 ```
@@ -360,7 +437,12 @@ next.config.ts            security headers
 ## Notes and limits
 
 - **One trader, one dataset.** RLS scopes every row to its owner; there is no sharing, team or
-  multi-tenant mode, by design.
+  multi-tenant mode, by design. Selling it to other people means other people run their own copy — the
+  Admin page manages access to a journal, it does not put two traders in one.
+- **No plans, no billing.** Access is a switch and an optional end date, set by hand on the Admin page.
+  Anything recurring would need a renewal job and a payment provider, and neither is here.
+- **Nobody reads anyone's trades.** The admin functions return counts and dates; the only thing an admin
+  can change about another account is whether it can sign in.
 - **Bursa Malaysia conventions.** Long only, shares/REITs/warrants/ETFs, positions in lots of 100, fees
   in the ringgit amounts the brokers publish. The fee model understands FX/CFD as charge-free so old data
   priced that way still loads, but the UI is built for stocks.

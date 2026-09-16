@@ -214,8 +214,10 @@ export default function Analytics() {
           )}
         </div>
         <div className="grid four">
-          <StatCard label="Max Drawdown" value={formatMoney(-stats.maxDrawdown, currency)} sub={ddSub} />
-          <StatCard label="Avg R" value={hasR ? `${avgR >= 0 ? "+" : ""}${avgR.toFixed(2)}R` : "—"} sub={hasR ? `stop recorded on ${stats.rCount} of ${ts.length}` : "needs a stop loss"} />
+          {/* Money that came out is red wherever it is shown, the same as the net and gross cards
+              above — a drawdown of zero is not a loss, so only a real one takes the tone. */}
+          <StatCard label="Max Drawdown" value={formatMoney(-stats.maxDrawdown, currency)} sub={ddSub} positive={stats.maxDrawdown > 0 ? false : undefined} />
+          <StatCard label="Avg R" value={hasR ? `${avgR >= 0 ? "+" : ""}${avgR.toFixed(2)}R` : "—"} sub={hasR ? `stop recorded on ${stats.rCount} of ${ts.length}` : "needs a stop loss"} positive={hasR ? avgR >= 0 : undefined} />
           <StatCard label="Best Win Streak" value={String(bestStreak(ts, true))} />
           <StatCard label="Best Loss Streak" value={String(bestStreak(ts, false))} />
         </div>

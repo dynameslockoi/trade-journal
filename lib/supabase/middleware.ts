@@ -27,7 +27,7 @@ export async function updateSession(request: NextRequest) {
   const user = data?.claims ? { id: data.claims.sub } : null;
   const path = request.nextUrl.pathname;
   const protectedPath = path === "/" ||
-    ["/journal","/analytics","/calendar","/accounts","/strategies","/tags","/reviews","/zakat","/settings"]
+    ["/journal","/analytics","/calendar","/accounts","/strategies","/tags","/reviews","/zakat","/settings","/admin"]
       .some(p => path === p || path.startsWith(`${p}/`));
   if (!user && protectedPath) {
     const url = request.nextUrl.clone();

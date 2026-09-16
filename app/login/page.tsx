@@ -2,6 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { loadMe } from "@/lib/admin";
+import { accessState } from "@/lib/access";
+import { toISODate, today } from "@/lib/dates";
 import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -29,9 +32,27 @@ export default function Login() {
     setError("");
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setError(error.message);
-    else window.location.href = "/";
-    setLoading(false);
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+      return;
+    }
+    // A suspended or expired account is refused here too, not only by the app shell: signing in and
+    // then being bounced by the first page reads as a bug rather than as a decision, and the session
+    // would otherwise be left live behind it. The sign-out is a courtesy to the *database* as much as
+    // the person — nothing is trusted to it.
+    try {
+      const state = accessState(await loadMe(), toISODate(today()));
+      if (!state.ok) {
+        await supabase.auth.signOut();
+        setError(state.detail);
+        setLoading(false);
+        return;
+      }
+    } catch {
+      // `supabase/admin.sql` has not been run, so there is no access state to enforce.
+    }
+    window.location.href = "/";
   }
 
   return <main className="auth-page">

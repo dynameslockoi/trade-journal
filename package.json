@@ -7,9 +7,11 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:fees && npm run test:calc",
+    "test": "npm run test:fees && npm run test:calc && npm run test:access && npm run test:sql",
     "test:fees": "node scripts/fee-check.mts",
-    "test:calc": "node scripts/calc-check.mts"
+    "test:calc": "node scripts/calc-check.mts",
+    "test:access": "node scripts/admin-check.mts",
+    "test:sql": "node scripts/sql-check.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",
@@ -30,6 +32,7 @@
     "zod": "^4.1.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.0",
