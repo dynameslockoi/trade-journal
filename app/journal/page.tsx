@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, SquarePen } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { FilterBar, emptyFilters, applyFilters, type Filters } from "@/components/filter-bar";
+import { SectorManager } from "@/components/sector-manager";
 import { PageHeader } from "@/components/page-header";
 import { LoadError, firstError } from "@/components/load-error";
 import { Badge } from "@/components/ui/badge";
@@ -30,23 +31,34 @@ export default function Journal() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const router = useRouter();
 
-  useEffect(() => { (async () => {
+  const load = useCallback(async () => {
     const s = createClient();
     const COLUMNS = `symbol,direction,entry_at,exit_at,net_pnl,r_multiple,session,account_id,strategy_id,${embedStrategy()},${embedAccount()},trade_tags(tag_id)`;
-    const [a0, b, c, d] = await Promise.all([
-      s.from("trades").select(`id,is_ipo,${COLUMNS}`).order("entry_at", { ascending: false }),
+    // `sector` arrives with supabase/sectors.sql and `is_ipo` with the Phase 9 block, and the journal
+    // must list trades on a database that has neither — so the select steps down through the columns
+    // that may not exist yet rather than showing an error in place of the journal.
+    const SELECTS = [
+      `id,is_ipo,sector,${COLUMNS}`,
+      `id,is_ipo,${COLUMNS}`,
+      `id,${COLUMNS}`,
+    ];
+    const [b, c, d] = await Promise.all([
       s.from("trading_accounts").select("id,name,currency"),
       s.from("strategies").select("id,name"),
       s.from("tags").select("id,name"),
     ]);
-    // `is_ipo` arrives with the Phase 9 migration; until then the journal still lists trades.
-    const a = a0.error ? await s.from("trades").select(`id,${COLUMNS}`).order("entry_at", { ascending: false }) : a0;
+    let a = await s.from("trades").select(SELECTS[0]).order("entry_at", { ascending: false });
+    for (let i = 1; i < SELECTS.length && a.error; i++) {
+      a = await s.from("trades").select(SELECTS[i]).order("entry_at", { ascending: false });
+    }
     setLoadError(firstError(a, b, c, d));
     setR((a.data ?? []).map(normalizeTrade) as Trade[]);
     setAccounts(b.data ?? []);
     setStrategies(c.data ?? []);
     setTags(d.data ?? []);
-  })(); }, []);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   // The calendar's "View in Journal" links here with a date range, so land pre-filtered on that day.
   useEffect(() => {
@@ -76,6 +88,21 @@ export default function Journal() {
           {row.original.is_ipo && <Badge variant="ipo" className="ml-2">IPO</Badge>}
         </>
       ),
+    },
+    {
+      id: "sector",
+      accessorFn: row => row.sector ?? "",
+      header: "Sector",
+      // Bands of neighbouring trades share a sector, so the name is only drawn when it changes —
+      // a column of repeated names is noise beside a column that reads as one block.
+      cell: ({ row, table }) => {
+        const sector = row.original.sector;
+        if (!sector) return <span className="muted">—</span>;
+        const sorted = table.getSortedRowModel().rows;
+        const at = sorted.findIndex(r => r.id === row.id);
+        const previous = at > 0 ? sorted[at - 1].original.sector : null;
+        return <span className={previous === sector ? "sector-repeat" : "sector-chip"}>{sector}</span>;
+      },
     },
     {
       id: "strategy",
@@ -138,7 +165,10 @@ export default function Journal() {
     <PageHeader
       title="Trade Journal"
       subtitle={`${rows.length} matching trade${rows.length === 1 ? "" : "s"}`}
-      actions={<Button onClick={() => router.push("/journal/new")}>+ Add Trade</Button>}
+      actions={<>
+        <SectorManager trades={r} onSaved={load} />
+        <Button onClick={() => router.push("/journal/new")}>+ Add Trade</Button>
+      </>}
     />
     <LoadError message={loadError} what="your trades" />
     <FilterBar filters={f} setFilters={setF} accounts={accounts} strategies={strategies} tags={tags} />
@@ -150,8 +180,8 @@ export default function Journal() {
           columns={columns}
           data={rows}
           initialSorting={[{ id: "entry_at", desc: true }]}
-          searchText={row => `${row.symbol} ${row.strategies?.name ?? ""} ${row.session ?? ""}`}
-          searchPlaceholder="Search symbol, strategy or session…"
+          searchText={row => `${row.symbol} ${row.sector ?? ""} ${row.strategies?.name ?? ""} ${row.session ?? ""}`}
+          searchPlaceholder="Search symbol, sector, strategy or session…"
           pageSize={15}
           onRowClick={row => router.push(`/journal/${row.id}`)}
           empty="No trades match these filters."

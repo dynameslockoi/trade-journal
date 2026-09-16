@@ -87,6 +87,192 @@ export const BROKER_PRESETS: BrokerPreset[] = [
 
 export const DEFAULT_BROKER_ID = "mplus";
 
+/* ============================================================== IPO subscriptions
+   An IPO application is not a market buy, so its opening leg is priced by the channel that took the
+   application rather than by the brokerage schedule: M+ Global and Moomoo charge nothing for a cash
+   application, Maybank charges RM1 plus SST, and borrowing to apply adds an interest charge over the
+   days the money is out. The sell side is an ordinary market sell, so it keeps the broker preset. */
+
+export type IpoChannelId = "mplus" | "moomoo" | "maybank";
+export type IpoMethod = "cash" | "financing";
+
+/** One multiple a channel finances, with the balance it asks you to hold first. */
+export type IpoLeverage = { multiple: number; minDeposit: number | null; minApplication: number | null };
+
+export type IpoChannel = {
+  id: IpoChannelId;
+  name: string;
+  note: string;
+  /** Charged once per application and not refunded. Maybank's RM1; free everywhere else. */
+  applicationFee: number;
+  /** SST on that fee, as a fraction of it. */
+  applicationSstRate: number;
+  /** Borrowing, when the channel offers it in its own app. `null` means a cash application only. */
+  financing: {
+    /** Annual rate as a fraction — 0.08 is 8% p.a. */
+    rate: number;
+    sstRate: number;
+    note: string;
+    /** An empty list means the channel publishes no tier table, so the amount is entered by hand. */
+    leverages: IpoLeverage[];
+  } | null;
+};
+
+/**
+ * Published rates as at September 2026. M+ financing is the tiered one (2x is 50:50, 5x is 20:80,
+ * 10x is 10:90) charged at 8% p.a. over the interest-bearing days plus SST, refunded when no
+ * allocation is received. Moomoo asks nothing for the application but charges financing interest at
+ * 6.8% p.a., calculated daily. Maybank's eShare application is RM1 per IPO with 8% SST on it.
+ */
+export const IPO_CHANNELS: IpoChannel[] = [
+  {
+    id: "mplus",
+    name: "M+ Global",
+    note: "Free on a cash application. Financing is 8% p.a. over the interest-bearing days, plus SST, and is refunded if you are not allotted.",
+    applicationFee: 0,
+    applicationSstRate: 0.08,
+    financing: {
+      rate: 0.08,
+      sstRate: 0.08,
+      note: "Charged on the financed amount for the interest-bearing days, so it is settled and refunded with the application.",
+      leverages: [
+        { multiple: 2, minDeposit: 10000, minApplication: 20000 },
+        { multiple: 5, minDeposit: 20000, minApplication: 100000 },
+        { multiple: 10, minDeposit: 50000, minApplication: 500000 },
+      ],
+    },
+  },
+  {
+    id: "moomoo",
+    name: "Moomoo Malaysia",
+    note: "No application fee and no CDS fee. Financing interest is 6.8% p.a., charged daily.",
+    applicationFee: 0,
+    applicationSstRate: 0,
+    financing: {
+      rate: 0.068,
+      sstRate: 0,
+      note: "Moomoo publishes no tier table for IPO financing — enter the amount borrowed and the days to include the interest.",
+      leverages: [],
+    },
+  },
+  {
+    id: "maybank",
+    name: "Maybank eShare",
+    note: "RM1 per application plus 8% SST (RM1.08), non-refundable. Cash applications only.",
+    applicationFee: 1,
+    applicationSstRate: 0.08,
+    financing: null,
+  },
+];
+
+export const DEFAULT_IPO_CHANNEL: IpoChannelId = "mplus";
+
+/** What an IPO financing application is assumed to be outstanding for, until you say otherwise. */
+export const DEFAULT_IPO_DAYS = 7;
+
+export function ipoChannel(id?: string | null): IpoChannel {
+  return IPO_CHANNELS.find(c => c.id === id) ?? IPO_CHANNELS.find(c => c.id === DEFAULT_IPO_CHANNEL)!;
+}
+
+/**
+ * The subscription route a trading broker implies: subscribing through M+ Global or Moomoo means the
+ * journal already knows which application channel to default to.
+ */
+export function ipoChannelForBroker(brokerId?: string | null): IpoChannelId {
+  if (brokerId === "moomoo_my") return "moomoo";
+  if (brokerId === "mplus") return "mplus";
+  return DEFAULT_IPO_CHANNEL;
+}
+
+/**
+ * What each multiple borrows, as a share of the application: 2x is half, 5x is four fifths, 10x is
+ * nine tenths. Deriving it keeps the tiers honest with the ratio the broker publishes.
+ */
+export function financedShare(multiple: number): number {
+  if (!Number.isFinite(multiple) || multiple <= 1) return 0;
+  return +(1 - 1 / multiple).toFixed(4);
+}
+
+/** The inputs the form keeps: the route, and what was borrowed for how long. */
+export type IpoInputs = {
+  channel: IpoChannelId;
+  method: IpoMethod;
+  /** The multiple picked, or null for a channel without a tier table. */
+  multiple: number | null;
+  /** The amount borrowed. Zero means a cash application whatever the method says. */
+  financed: number;
+  /** Interest-bearing days the financing is charged over. */
+  days: number;
+};
+
+/** The subscription charge, both as the inputs and as the money they add up to. */
+export type IpoCharge = IpoInputs & {
+  channelName: string;
+  /** Annual rate actually applied, or null on a cash application. */
+  rate: number | null;
+  applicationFee: number;
+  applicationSst: number;
+  financingFee: number;
+  financingSst: number;
+  total: number;
+};
+
+const asMoney = (n: unknown) => {
+  const v = Number(n);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+};
+
+/**
+ * Price one IPO application. A cash application costs the channel's flat fee (free on M+ and
+ * Moomoo, RM1.08 on Maybank) and nothing else — no brokerage, clearing or stamp duty, because no
+ * shares changed hands on the exchange. Borrowing adds interest at the channel's annual rate over
+ * the interest-bearing days, and its SST where one applies.
+ */
+export function ipoCharge(inputs: IpoInputs): IpoCharge {
+  const channel = ipoChannel(inputs.channel);
+  const applicationFee = round2(asMoney(channel.applicationFee));
+  const applicationSst = roundUpToCent(applicationFee * channel.applicationSstRate);
+
+  const borrowing = channel.financing;
+  const financed = asMoney(inputs.financed);
+  const days = asMoney(inputs.days);
+  const borrowingUsed = inputs.method === "financing" && borrowing !== null && financed > 0 && days > 0;
+  const financingFee = borrowingUsed ? roundUpToCent(financed * borrowing!.rate / 365 * days) : 0;
+  const financingSst = borrowingUsed ? roundUpToCent(financingFee * borrowing!.sstRate) : 0;
+
+  return {
+    ...inputs,
+    // A cash application has no rate to report, even when the channel's does exist.
+    method: borrowingUsed ? "financing" : "cash",
+    channelName: channel.name,
+    rate: borrowingUsed ? borrowing!.rate : null,
+    applicationFee,
+    applicationSst,
+    financingFee,
+    financingSst,
+    total: round2(applicationFee + applicationSst + financingFee + financingSst),
+  };
+}
+
+/** Human-readable subscription charge for the fee panel. */
+export function describeIpo(charge: IpoCharge, format: (value: number) => string = value => value.toFixed(2)): string {
+  const parts = [
+    charge.applicationFee ? `application ${format(charge.applicationFee)}` : "",
+    charge.applicationSst ? `SST ${format(charge.applicationSst)}` : "",
+    charge.financingFee ? `financing ${format(charge.financingFee)}` : "",
+    charge.financingSst ? `SST on financing ${format(charge.financingSst)}` : "",
+  ].filter(Boolean);
+  if (parts.length) return parts.join(" + ");
+  return "free";
+}
+
+/** The subscription line's own label: who took the application and how it was funded. */
+export function ipoTitle(charge: IpoCharge): string {
+  if (charge.method === "financing" && charge.multiple) return `${charge.channelName} · ${charge.multiple}x`;
+  if (charge.method === "financing") return `${charge.channelName} · financed`;
+  return `${charge.channelName} · cash`;
+}
+
 export function brokerPreset(id?: string | null): BrokerPreset {
   return BROKER_PRESETS.find(p => p.id === id) ?? BROKER_PRESETS.find(p => p.id === DEFAULT_BROKER_ID)!;
 }
@@ -108,7 +294,9 @@ export type FeeBreakdown = {
   sstRate: number | null;
   open: FeeLeg;
   close: FeeLeg;
-  /** brokerage + platform + SST — goes into `trades.commission` */
+  /** The subscription, on a trade that came from an IPO application — null on a market buy. */
+  ipo: IpoCharge | null;
+  /** brokerage + platform + SST + the subscription — goes into `trades.commission` */
   brokerCharges: number;
   /** clearing fee + stamp duty — goes into `trades.fees` */
   marketCharges: number;
@@ -171,14 +359,20 @@ export function roundTripFees(
   entryPrice: unknown,
   exitPrice: unknown,
   quantity: unknown,
-  opts: { assetClass?: AssetClass; intraday?: boolean; sstRate?: number | null } = {}
+  opts: { assetClass?: AssetClass; intraday?: boolean; sstRate?: number | null; ipo?: IpoInputs | null } = {}
 ): FeeBreakdown {
   const assetClass = opts.assetClass ?? "shares";
   const intraday = Boolean(opts.intraday);
   const sstRate = opts.sstRate ?? null;
   const qty = Number(quantity);
   const size = Number.isFinite(qty) && qty > 0 ? qty : 0;
-  const open = legFees(preset, Number(entryPrice) * size, { assetClass, intraday, sstRate });
+  const entryValue = Number(entryPrice) * size;
+  // An IPO application is priced by its channel, not by the brokerage schedule, so the opening leg
+  // carries the contract value for reference and no market charges at all.
+  const ipo = opts.ipo ? ipoCharge(opts.ipo) : null;
+  const open = ipo
+    ? { ...EMPTY_LEG, contractValue: round2(Number.isFinite(entryValue) && entryValue > 0 ? entryValue : 0) }
+    : legFees(preset, entryValue, { assetClass, intraday, sstRate });
   const close = legFees(preset, Number(exitPrice) * size, { assetClass, intraday, sstRate });
 
   const brokerage = round2(open.brokerage + close.brokerage);
@@ -186,6 +380,7 @@ export function roundTripFees(
   const clearing = round2(open.clearing + close.clearing);
   const stampDuty = round2(open.stampDuty + close.stampDuty);
   const sst = round2(open.sst + close.sst);
+  const subscribe = round2(ipo?.total ?? 0);
 
   return {
     brokerId: preset.id,
@@ -194,9 +389,12 @@ export function roundTripFees(
     sstRate,
     open,
     close,
-    brokerCharges: round2(brokerage + platform + sst),
+    ipo,
+    // The subscription is a broker-side charge, so it sits with the commission rather than with the
+    // clearing and stamp duty that only a real market trade pays.
+    brokerCharges: round2(brokerage + platform + sst + subscribe),
     marketCharges: round2(clearing + stampDuty),
-    total: round2(open.total + close.total),
+    total: round2(open.total + close.total + subscribe),
   };
 }
 

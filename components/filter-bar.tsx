@@ -2,7 +2,7 @@
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { SESSIONS, sessionLabel } from "@/lib/trading";
+import { BURSA_SECTORS, SESSIONS, sessionLabel } from "@/lib/trading";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -18,8 +18,8 @@ import {
   SELECT_NONE,
 } from "@/components/ui/select";
 
-export type Filters = { account: string; symbol: string; strategy: string; session: string; result: string; ipo: string; from: string; to: string; tag: string };
-export const emptyFilters: Filters = { account: "", symbol: "", strategy: "", session: "", result: "", ipo: "", from: "", to: "", tag: "" };
+export type Filters = { account: string; symbol: string; strategy: string; sector: string; session: string; result: string; ipo: string; from: string; to: string; tag: string };
+export const emptyFilters: Filters = { account: "", symbol: "", strategy: "", sector: "", session: "", result: "", ipo: "", from: "", to: "", tag: "" };
 
 /** Radix refuses an empty item value, so every "any" choice travels through the sentinel. */
 const toValue = (v: string) => v || SELECT_NONE;
@@ -80,6 +80,17 @@ export function FilterBar({ filters, setFilters, accounts, strategies, tags }: {
               <div className="form-field">
                 <Label htmlFor="flt-symbol">Symbol</Label>
                 <Input id="flt-symbol" value={filters.symbol} placeholder="e.g. GTA" onChange={e => upd("symbol", e.target.value)} />
+              </div>
+
+              <div className="form-field">
+                <Label htmlFor="flt-sector">Sector</Label>
+                <Select value={toValue(filters.sector)} onValueChange={v => upd("sector", fromValue(v))}>
+                  <SelectTrigger id="flt-sector"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SELECT_NONE}>All sectors</SelectItem>
+                    {BURSA_SECTORS.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="form-field">
@@ -146,4 +157,4 @@ export function FilterBar({ filters, setFilters, accounts, strategies, tags }: {
   );
 }
 
-export function applyFilters(ts: any[], f: Filters) { return ts.filter(t => { const pnl = Number(t.net_pnl || 0); if (f.account && t.account_id !== f.account) return false; if (f.strategy && t.strategy_id !== f.strategy) return false; if (f.session && t.session !== f.session) return false; if (f.result === "win" && pnl <= 0) return false; if (f.result === "loss" && pnl >= 0) return false; if (f.result === "breakeven" && pnl !== 0) return false; if (f.ipo === "ipo" && !t.is_ipo) return false; if (f.ipo === "market" && t.is_ipo) return false; if (f.symbol && !String(t.symbol || "").toLowerCase().includes(f.symbol.trim().toLowerCase())) return false; if (f.from && new Date(t.entry_at) < new Date(`${f.from}T00:00:00`)) return false; if (f.to && new Date(t.entry_at) > new Date(`${f.to}T23:59:59.999`)) return false; if (f.tag && !(t.trade_tags || []).some((x: any) => x.tag_id === f.tag)) return false; return true }) }
+export function applyFilters(ts: any[], f: Filters) { return ts.filter(t => { const pnl = Number(t.net_pnl || 0); if (f.account && t.account_id !== f.account) return false; if (f.strategy && t.strategy_id !== f.strategy) return false; if (f.session && t.session !== f.session) return false; if (f.sector && (t.sector || "") !== f.sector) return false; if (f.result === "win" && pnl <= 0) return false; if (f.result === "loss" && pnl >= 0) return false; if (f.result === "breakeven" && pnl !== 0) return false; if (f.ipo === "ipo" && !t.is_ipo) return false; if (f.ipo === "market" && t.is_ipo) return false; if (f.symbol && !String(t.symbol || "").toLowerCase().includes(f.symbol.trim().toLowerCase())) return false; if (f.from && new Date(t.entry_at) < new Date(`${f.from}T00:00:00`)) return false; if (f.to && new Date(t.entry_at) > new Date(`${f.to}T23:59:59.999`)) return false; if (f.tag && !(t.trade_tags || []).some((x: any) => x.tag_id === f.tag)) return false; return true }) }

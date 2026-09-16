@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { capitalByAccount, dayKey, formatMoney, type CashFlow } from "@/lib/trading";
 import { dateLabel } from "@/lib/dates";
@@ -40,6 +41,8 @@ export default function Accounts() {
   const [loadError, setLoadError] = useState<string | null>(null);
   // The account a deposit/withdrawal is being recorded against.
   const [moving, setMoving] = useState<{ account: Account; kind: Kind } | null>(null);
+  // The account whose ledger is open in the movements dialog.
+  const [listing, setListing] = useState<Account | null>(null);
   const [entry, setEntry] = useState(emptyEntry);
   const [savingMove, setSavingMove] = useState(false);
 
@@ -296,7 +299,8 @@ export default function Accounts() {
                 <div className={`text-[11.5px] mt-1 ${pnl >= 0 ? "positive" : "negative"}`}>Journal P&L {formatMoney(pnl, a.currency, true)}</div>
                 {a.max_daily_loss !== null && <div className="muted text-[10px] mt-1">Daily loss limit {formatMoney(a.max_daily_loss, a.currency)}</div>}
 
-                {/* The ledger grows to fill the card, so two cards side by side end level. */}
+                {/* Only the totals and the latest move sit on the card. The ledger itself is a dialog,
+                    because a card that grows with every deposit is the wrong shape for a list. */}
                 <div className="cashflow">
                   <div className="cashflow-head">
                     <span>Money in / out</span>
@@ -306,40 +310,30 @@ export default function Accounts() {
                     </span>
                   </div>
                   {flows ? (
-                    <div className="cashflow-list">
-                      {movements.map(m => (
-                        <div className="cashflow-row" key={m.id}>
-                          <span className="cashflow-main">
-                            <span className="cashflow-note" title={m.note ?? undefined}>
-                              {m.note || (m.kind === "deposit" ? "Deposit" : "Withdrawal")}
-                            </span>
-                            <span className="muted cashflow-when">
-                              {m.kind === "deposit" ? "Deposit" : "Withdrawal"} · {dateLabel(m.occurred_on)}
-                            </span>
+                    <div className="cashflow-latest">
+                      {movements.length ? (
+                        <>
+                          <span className="cashflow-note" title={movements[0].note ?? undefined}>
+                            {movements[0].note || (movements[0].kind === "deposit" ? "Deposit" : "Withdrawal")}
                           </span>
-                          <b className={`tabular-nums ${m.kind === "deposit" ? "positive" : "negative"}`}>
-                            {m.kind === "deposit" ? "+" : "−"}{formatMoney(Number(m.amount), a.currency)}
-                          </b>
-                          <ConfirmButton
-                            size="icon"
-                            variant="ghost"
-                            className="cashflow-remove"
-                            title="Remove this movement?"
-                            description={`${m.kind === "deposit" ? "Deposit" : "Withdrawal"} of ${formatMoney(Number(m.amount), a.currency)} will be removed from the money in/out totals.`}
-                            confirmLabel="Remove"
-                            onConfirm={() => removeMovement(m.id)}
-                          >
-                            ✕
-                          </ConfirmButton>
-                        </div>
-                      ))}
-                      {!movements.length && <div className="muted text-[11px]">No deposits or withdrawals yet.</div>}
+                          <span className="muted cashflow-when">
+                            {movements.length > 1 ? `${movements.length} movements · latest ` : ""}
+                            {dateLabel(movements[0].occurred_on)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="muted text-[11px]">No deposits or withdrawals yet.</span>
+                      )}
                     </div>
                   ) : (
                     <div className="muted text-[11px]">Opening balance {formatMoney(t.deposited, a.currency)} — no ledger yet.</div>
                   )}
                   {flows && (
-                    <div className="mt-3 flex gap-2">
+                    <div className="cashflow-actions">
+                      <Button type="button" size="sm" variant="secondary" className="cashflow-ledger" onClick={() => setListing(a)}>
+                        <span>Movements{movements.length ? ` (${movements.length})` : ""}</span>
+                        <ChevronRight size={14} />
+                      </Button>
                       <Button type="button" size="sm" variant="secondary" onClick={() => openMovement(a, "deposit")}>+ Deposit</Button>
                       <Button type="button" size="sm" variant="secondary" onClick={() => openMovement(a, "withdrawal")}>− Withdraw</Button>
                     </div>
@@ -351,6 +345,60 @@ export default function Accounts() {
         })}
       </div>
       {!items.length && <Card><CardContent className="empty">No accounts yet. Add your first trading account.</CardContent></Card>}
+
+      {listing && (() => {
+        const movements = movementsBy[listing.id] ?? [];
+        const t = totals(listing.id);
+        return (
+          <Dialog open onOpenChange={next => { if (!next) setListing(null); }}>
+            <DialogContent aria-describedby={undefined}>
+              <DialogTitle>Deposits &amp; withdrawals — {listing.name}</DialogTitle>
+              <div className="cashflow-head mt-4">
+                <span>Money in / out</span>
+                <span className="tabular-nums">
+                  <b className="positive">+{formatMoney(t.deposited, listing.currency)}</b>
+                  <b className="negative ml-2">−{formatMoney(t.withdrawn, listing.currency)}</b>
+                </span>
+              </div>
+              {/* The list scrolls inside a fixed height, so a hundred top-ups stays a dialog. */}
+              <div className="movement-list">
+                {movements.map(m => (
+                  <div className="cashflow-row" key={m.id}>
+                    <span className="cashflow-main">
+                      <span className="cashflow-note" title={m.note ?? undefined}>
+                        {m.note || (m.kind === "deposit" ? "Deposit" : "Withdrawal")}
+                      </span>
+                      <span className="muted cashflow-when">
+                        {m.kind === "deposit" ? "Deposit" : "Withdrawal"} · {dateLabel(m.occurred_on)}
+                      </span>
+                    </span>
+                    <b className={`tabular-nums ${m.kind === "deposit" ? "positive" : "negative"}`}>
+                      {m.kind === "deposit" ? "+" : "−"}{formatMoney(Number(m.amount), listing.currency)}
+                    </b>
+                    <ConfirmButton
+                      size="icon"
+                      variant="ghost"
+                      className="cashflow-remove"
+                      title="Remove this movement?"
+                      description={`${m.kind === "deposit" ? "Deposit" : "Withdrawal"} of ${formatMoney(Number(m.amount), listing.currency)} will be removed from the money in/out totals.`}
+                      confirmLabel="Remove"
+                      onConfirm={() => removeMovement(m.id)}
+                    >
+                      ✕
+                    </ConfirmButton>
+                  </div>
+                ))}
+                {!movements.length && <div className="muted text-[11px] py-3">No deposits or withdrawals yet.</div>}
+              </div>
+              <div className="cashflow-actions mt-4">
+                <Button type="button" size="sm" variant="secondary" onClick={() => openMovement(listing, "deposit")}>+ Deposit</Button>
+                <Button type="button" size="sm" variant="secondary" onClick={() => openMovement(listing, "withdrawal")}>− Withdraw</Button>
+                <Button type="button" size="sm" variant="secondary" className="ml-auto" onClick={() => setListing(null)}>Close</Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
 
       {moving && (
         <Dialog open onOpenChange={next => { if (!next) { setMoving(null); setEntry(emptyEntry); } }}>

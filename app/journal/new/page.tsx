@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
-import { BURSA_BOARD_LOT, SESSIONS, calculateGrossPnl, calculateRisk, formatMoney, formatR, localDatetimeToIso, numberOrNull, roundMoney, sessionForTime, sessionLabel, stripUnknownColumn } from "@/lib/trading";
+import { BURSA_SECTORS, SESSIONS, calculateGrossPnl, calculateRisk, formatLots, formatMoney, formatR, localDatetimeToIso, lotsToShares, numberOrNull, roundMoney, sessionForTime, sessionLabel, sharesToLots, stripUnknownColumn } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
 import { ScreenshotInput } from "@/components/screenshot-input";
 import { LoadError, firstError } from "@/components/load-error";
@@ -16,7 +16,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SELECT_NONE } from "@/components/ui/select";
-import { BROKER_PRESETS, DEFAULT_BROKER_ID, SHARES, brokerPreset, describeLeg, roundTripFees, type FeeBreakdown } from "@/lib/fees";
+import { BROKER_PRESETS, DEFAULT_BROKER_ID, SHARES, brokerPreset, describeIpo, describeLeg, ipoChannelForBroker, ipoTitle, roundTripFees, type FeeBreakdown } from "@/lib/fees";
+import { IpoSubscription, defaultIpoState, ipoInputs, type IpoState } from "@/components/ipo-subscription";
+
 
 type Account = { id: string; name: string; broker?: string | null };
 type Strategy = { id: string; name: string };
@@ -37,7 +39,7 @@ const localNow = () => {
 // once on the server and again in the browser, and the two differ by the time the page took to
 // arrive — which React reports as a hydration mismatch (the rendered "2:28 pm" against "2:32 pm").
 const init = {
-  symbol: "", account_id: "", strategy_id: "", asset_class: "shares",
+  symbol: "", sector: "", account_id: "", strategy_id: "", asset_class: "shares",
   entry_at: "", exit_at: "",
   entry_price: "", exit_price: "", position_size: "", stop_loss: "", take_profit: "",
   gross_pnl: "0", commission: "0", swap: "0", fees: "0", risk_amount: "", risk_percent: "",
@@ -60,6 +62,8 @@ export default function NewTrade() {
   const [autoCalc, setAutoCalc] = useState(true);
   const [sstOverride, setSstOverride] = useState("");
   const [lots, setLots] = useState("");
+  // Only used on a trade flagged as an IPO allocation; idle otherwise.
+  const [ipo, setIpo] = useState<IpoState>(() => defaultIpoState(DEFAULT_BROKER_ID));
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -67,6 +71,8 @@ export default function NewTrade() {
   // stored, because an empty session cannot be handed to the Select (Radix rejects "" as a value,
   // and reports the value it was given as a change while it matches no option).
   const [sessionPicked, setSessionPicked] = useState<string | null>(null);
+  // Where the sector came from, so the field can say so rather than looking like it was chosen.
+  const [sectorFrom, setSectorFrom] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -107,13 +113,20 @@ export default function NewTrade() {
   const parsedSst = sstOverride.trim() === "" ? null : Number(sstOverride) / 100;
   const sstRate = parsedSst !== null && Number.isFinite(parsedSst) ? parsedSst : null;
 
+  const quantity = numberOrNull(form.position_size);
+  const entryValue = quantity && quantity > 0 ? roundMoney(quantity * (numberOrNull(form.entry_price) ?? 0)) : 0;
+  // What the allocation is applied for, which is what a financing tier borrows a share of.
+  const ipoTerms = useMemo(() => ipoInputs(ipo, entryValue), [ipo, entryValue]);
+
   const fees: FeeBreakdown = useMemo(
     () => roundTripFees(preset, form.entry_price, form.exit_price, form.position_size, {
       assetClass,
       intraday: intraday && preset.market === "bursa",
       sstRate,
+      // A subscription replaces the opening leg outright, so this is only priced on an IPO trade.
+      ipo: form.is_ipo ? ipoTerms : null,
     }),
-    [preset, form.entry_price, form.exit_price, form.position_size, assetClass, intraday, sstRate]
+    [preset, form.entry_price, form.exit_price, form.position_size, assetClass, intraday, sstRate, form.is_ipo, ipoTerms]
   );
 
   // Bursa Malaysia is long-only here, so the contract always profits when the price rises.
@@ -128,8 +141,6 @@ export default function NewTrade() {
   const swap = Number(form.swap || 0);
   const netPnl = roundMoney(grossPnl - commission - exchangeFees - swap);
 
-  const quantity = numberOrNull(form.position_size);
-  const entryValue = quantity && quantity > 0 ? roundMoney(quantity * (numberOrNull(form.entry_price) ?? 0)) : 0;
   const exitValue = quantity && quantity > 0 ? roundMoney(quantity * (numberOrNull(form.exit_price) ?? 0)) : 0;
 
   const risk = useMemo(
@@ -145,10 +156,34 @@ export default function NewTrade() {
     if (account?.broker) setBroker(account.broker);
   }
 
+  // The form asks for lots and stores shares. The field keeps its own string so a half-typed
+  // "12." is not parsed, echoed back as 12 and lost mid-keystroke.
+  /**
+   * A sector belongs to the stock, not to the trade, so once a symbol has been given one it is
+   * carried to the next trade of that symbol instead of being picked again — the field stays empty
+   * for a symbol never traded before.
+   */
+  async function fillSectorFromHistory() {
+    const sym = form.symbol.trim().toUpperCase();
+    if (!sym || form.sector) return;
+    const { data } = await createClient()
+      .from("trades")
+      .select("sector")
+      .eq("symbol", sym)
+      .not("sector", "is", null)
+      .order("entry_at", { ascending: false })
+      .limit(1);
+    const known = data?.[0]?.sector;
+    if (!known) return;
+    // Answered against the symbol that was asked about: typing on must not strand the old answer.
+    setForm(x => (x.symbol.trim().toUpperCase() === sym && !x.sector ? { ...x, sector: known } : x));
+    setSectorFrom(sym);
+  }
+
   function updateLots(value: string) {
     setLots(value);
-    const n = Number(value);
-    if (value.trim() !== "" && Number.isFinite(n) && n > 0) set("position_size", String(n * BURSA_BOARD_LOT));
+    const shares = lotsToShares(value);
+    set("position_size", shares === null ? "" : String(shares));
   }
 
   async function save(e: React.FormEvent) {
@@ -190,6 +225,7 @@ export default function NewTrade() {
     payload.exit_at = payload.exit_at || null;
     payload.account_id = payload.account_id || null;
     payload.strategy_id = payload.strategy_id || null;
+    payload.sector = payload.sector || null;
 
     let { data: trade, error: insertError } = await s.from("trades").insert(payload).select("id").single();
     if (insertError && (insertError.code === "PGRST204" || /fee_breakdown/.test(insertError.message ?? ""))) {
@@ -226,23 +262,47 @@ export default function NewTrade() {
 
   return (
     <div className="content max-w-[1100px]">
-      <PageHeader eyebrow="Journal / New Trade" title="Add Trade" subtitle="Charges and gross P&L are calculated from the Bursa lot size and your broker preset." />
+      <PageHeader eyebrow="Journal / New Trade" title="Add Trade" subtitle="Enter the position in lots; charges and gross P&L follow from the shares and your broker preset." />
       <LoadError message={loadError} what="your accounts, strategies and tags" />
       <form onSubmit={save} className="grid">
         <Card>
           <CardHeader><CardTitle>Trade Details</CardTitle></CardHeader>
           <CardContent>
             <div className="grid three">
-              {([["symbol", "Symbol"], ["entry_price", "Entry Price"], ["exit_price", "Exit Price"], ["position_size", "Position Size (shares)"], ["stop_loss", "Stop Loss"], ["take_profit", "Take Profit"]] as const).map(([k, l]) => (
+              <div className="form-field">
+                <Label htmlFor="nt-symbol">Symbol</Label>
+                <Input id="nt-symbol" required value={form.symbol} onChange={e => set("symbol", e.target.value.toUpperCase())} onBlur={fillSectorFromHistory} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="nt-sector">Sector</Label>
+                <Select
+                  value={form.sector || SELECT_NONE}
+                  onValueChange={v => { set("sector", v === SELECT_NONE ? "" : v); setSectorFrom(""); }}
+                >
+                  <SelectTrigger id="nt-sector"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SELECT_NONE}>Not set</SelectItem>
+                    {BURSA_SECTORS.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {sectorFrom && <span className="muted text-[10px]">from your last {sectorFrom} trade</span>}
+              </div>
+              {([["entry_price", "Entry Price"], ["exit_price", "Exit Price"]] as const).map(([k, l]) => (
                 <div className="form-field" key={k}>
                   <Label htmlFor={`nt-${k}`}>{l}</Label>
-                  <Input id={`nt-${k}`} required={k === "symbol"} type={k === "symbol" ? "text" : "number"} step="any" value={(form as any)[k]} onChange={e => set(k, e.target.value)} />
+                  <Input id={`nt-${k}`} type="number" step="any" value={(form as any)[k]} onChange={e => set(k, e.target.value)} />
                 </div>
               ))}
               <div className="form-field">
-                <Label htmlFor="nt-lots">Board Lots ×{BURSA_BOARD_LOT}</Label>
-                <Input id="nt-lots" type="number" step="any" min="0" value={lots} onChange={e => updateLots(e.target.value)} placeholder="optional helper" />
+                <Label htmlFor="nt-lots">Position Lot</Label>
+                <Input id="nt-lots" type="number" step="any" min="0" value={lots} onChange={e => updateLots(e.target.value)} placeholder="e.g. 50" />
               </div>
+              {([["stop_loss", "Stop Loss"], ["take_profit", "Take Profit"]] as const).map(([k, l]) => (
+                <div className="form-field" key={k}>
+                  <Label htmlFor={`nt-${k}`}>{l}</Label>
+                  <Input id={`nt-${k}`} type="number" step="any" value={(form as any)[k]} onChange={e => set(k, e.target.value)} />
+                </div>
+              ))}
               <div className="form-field">
                 <Label htmlFor="nt-entry">Entry Date/Time</Label>
                 <DateTimePicker id="nt-entry" value={form.entry_at} onChange={changeEntryAt} />
@@ -273,11 +333,16 @@ export default function NewTrade() {
               </div>
             </div>
             <div className="review-label mt-3">
-              <Checkbox id="nt-ipo" checked={!!form.is_ipo} onCheckedChange={v => set("is_ipo", !!v)} />
-              <Label htmlFor="nt-ipo">IPO allocation <span className="muted">— bought through an IPO allotment, not the open market</span></Label>
+              <Checkbox id="nt-ipo" checked={!!form.is_ipo} onCheckedChange={v => {
+                set("is_ipo", !!v);
+                // The channel defaults from the broker in use, because subscribing through M+ Global
+                // or Moomoo means the journal already knows where the application went.
+                if (v) setIpo(x => ({ ...x, channel: ipoChannelForBroker(broker) }));
+              }} />
+              <Label htmlFor="nt-ipo">IPO allocation <span className="muted">— an allotment rather than a market buy, so its subscription is priced in Fees &amp; Charges below instead of the opening contract</span></Label>
             </div>
             <div className="calc-strip">
-              <span className="muted">Contract {money(entryValue)} → {money(exitValue)} · Bursa board lot is {BURSA_BOARD_LOT} shares</span>
+              <span className="muted">Contract {money(entryValue)} → {money(exitValue)} · {formatLots(form.position_size)}</span>
             </div>
           </CardContent>
         </Card>
@@ -285,6 +350,15 @@ export default function NewTrade() {
         <Card>
           <CardHeader><CardTitle>Fees &amp; Charges</CardTitle></CardHeader>
           <CardContent>
+            {form.is_ipo && fees.ipo ? (
+              <IpoSubscription
+                idPrefix="nt"
+                state={ipo}
+                onChange={setIpo}
+                charge={fees.ipo}
+                contractValue={entryValue}
+              />
+            ) : null}
             <div className="flex flex-wrap items-end gap-3">
               <div className="form-field flex-[1_1_240px]">
                 <Label htmlFor="nt-broker">Broker preset</Label>
@@ -315,7 +389,11 @@ export default function NewTrade() {
             </div>
 
             <div className="fee-panel">
-              <div className="fee-row"><span className="muted">Opening contract {money(entryValue)}</span><span>{describeLeg(fees.open, formatMoney)}</span></div>
+              {fees.ipo ? (
+                <div className="fee-row"><span className="muted">Subscription · {ipoTitle(fees.ipo)}</span><span>{describeIpo(fees.ipo, formatMoney)}</span></div>
+              ) : (
+                <div className="fee-row"><span className="muted">Opening contract {money(entryValue)}</span><span>{describeLeg(fees.open, formatMoney)}</span></div>
+              )}
               <div className="fee-row"><span className="muted">Closing contract {money(exitValue)}</span><span>{describeLeg(fees.close, formatMoney)}</span></div>
               <div className="fee-row fee-total"><span>Total charges</span><span>{money(fees.total)}</span></div>
             </div>

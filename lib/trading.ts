@@ -18,6 +18,8 @@ export type Trade = {
   account_id?: string | null;
   strategy_id?: string | null;
   session?: string | null;
+  /** Bursa sector the stock belongs to — see `BURSA_SECTORS`. */
+  sector?: string | null;
   /** True when the position came from an IPO allocation rather than a market buy. */
   is_ipo?: boolean | null;
   mae?: number | string | null;
@@ -123,8 +125,72 @@ export function normalizeTrade(row: any): Trade {
   };
 }
 
+/**
+ * Bursa Malaysia's own sector classification, in the exchange's order.
+ *
+ * A sector is a property of the stock, not of the trade, but it is stored on the trade: that keeps
+ * one source of truth, and lets a sector be assigned per symbol for trades recorded long before the
+ * field existed.
+ */
+export const BURSA_SECTORS = [
+  "Construction",
+  "Consumer Products & Services",
+  "Energy",
+  "Financial Services",
+  "Health Care",
+  "Industrial Products & Services",
+  "Plantation",
+  "Property",
+  "Real Estate Investment Trusts",
+  "Technology",
+  "Telecommunications & Media",
+  "Transportation & Logistics",
+  "Utilities",
+  "SPAC",
+  "Closed-end Fund",
+] as const;
+
+/** How a trade with no sector reads, in the journal and in the analytics groupings. */
+export const SECTOR_UNSET = "Not set";
+
 /** Bursa Malaysia trades in board lots of 100 shares. */
 export const BURSA_BOARD_LOT = 100;
+
+/** The sector recorded against a trade, or the placeholder the groupings use when there is none. */
+export function sectorOf(trade: { sector?: string | null }) {
+  const s = typeof trade?.sector === "string" ? trade.sector.trim() : "";
+  return s === "" ? SECTOR_UNSET : s;
+}
+
+/**
+ * A position is written and read in lots — the unit an order is placed in — and stored in shares,
+ * because that is what the broker's charges are levied on. One lot is 100 shares.
+ *
+ * The stored figure deliberately stays shares: every trade already in the journal is in shares, and
+ * re-reading them as lots would multiply each position by a hundred.
+ */
+export function lotsToShares(lots: unknown): number | null {
+  const n = numberOrNull(lots);
+  if (n === null || n <= 0) return null;
+  return n * BURSA_BOARD_LOT;
+}
+
+/** Shares as lots. Null — not 0 — when there is no size, so a blank field stays blank. */
+export function sharesToLots(shares: unknown): number | null {
+  const n = numberOrNull(shares);
+  if (n === null || n <= 0) return null;
+  return n / BURSA_BOARD_LOT;
+}
+
+/** "50 lots (5,000 shares)" — `{ shares: false }` drops the parenthetical for a heading. */
+export function formatLots(shares: unknown, options?: { shares?: boolean }) {
+  const lots = sharesToLots(shares);
+  if (lots === null) return "—";
+  // A whole lot needs no decimals; a part lot keeps up to two, without a trailing zero.
+  const label = `${lots % 1 === 0 ? formatNumber(lots, 0) : String(Number(lots.toFixed(2)))} lots`;
+  if (options?.shares === false) return label;
+  return `${label} (${formatNumber(lots * BURSA_BOARD_LOT, 0)} shares)`;
+}
 
 /**
  * Bursa Malaysia trades in two windows, so a trade is bucketed by the one it was opened in.
@@ -378,6 +444,42 @@ export function dayKey(value: string | Date) {
   const parts = myParts(value);
   if (!parts) return "";
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+/**
+ * The Malaysian calendar month of a timestamp as "YYYY-MM" — the key a month's trades share.
+ * Malaysia time for the same reason `dayKey` is: a trade opened on the 1st at 09:00 belongs to that
+ * month wherever the page is read.
+ */
+export function monthKey(value: string | Date) {
+  const parts = myParts(value);
+  if (!parts) return "";
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}`;
+}
+
+/** A "YYYY-MM" key moved by whole months, for walking a window forwards or backwards. */
+export function shiftMonth(key: string, by: number) {
+  const m = /^(\d{4})-(\d{2})$/.exec(key);
+  if (!m) return "";
+  const index = Number(m[1]) * 12 + (Number(m[2]) - 1) + by;
+  return `${Math.floor(index / 12)}-${String(((index % 12) + 12) % 12 + 1).padStart(2, "0")}`;
+}
+
+/** "Jun 2026" — a month key as a column heading. */
+export function monthLabel(key: string) {
+  const m = /^(\d{4})-(\d{2})$/.exec(key);
+  if (!m) return key;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1));
+  return d.toLocaleDateString("en-MY", { month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+/** The first and last Malaysian calendar day of a month key, as the filter bar's own date strings. */
+export function monthBounds(key: string) {
+  const m = /^(\d{4})-(\d{2})$/.exec(key);
+  if (!m) return { from: "", to: "" };
+  // Day 0 of the next month is the last day of this one.
+  const last = new Date(Date.UTC(Number(m[1]), Number(m[2]), 0)).getUTCDate();
+  return { from: `${key}-01`, to: `${key}-${String(last).padStart(2, "0")}` };
 }
 
 /** "+0.18%" / "-1.20%" — a positive figure carries its sign so columns align. */

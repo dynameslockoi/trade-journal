@@ -304,6 +304,10 @@ code { background: var(--chip-bg); color: var(--text-dim); padding: 2px 6px; bor
 .grid > * { min-width: 0; }
 /* Column counts for the desktop layout — the media queries below only ever narrow these. */
 .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* The last card of an odd run takes the whole row. Left in the first column it would end the page in
+   a card-shaped gap as wide as its neighbour, which reads as a broken layout rather than a
+   deliberate one — and a table shown full width has more room than it would have had. */
+.grid.two > :last-child:nth-child(odd) { grid-column: 1 / -1; }
 /* A pair of cards that share one height. Each card is a column whose last block is pushed to the
    bottom (`.pair-foot`), so the shorter one spends its extra height as breathing room in the middle
    instead of ending in a ragged step beside its neighbour. */
@@ -479,6 +483,20 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
   font-size: 9.5px; font-weight: 600; letter-spacing: 0.02em;
 }
 /* Sits beside a symbol in the journal, so an IPO allocation is visible at a glance. */
+/* The application's own terms, set apart from the broker schedule beneath it because a subscription
+   and a market buy are priced by different rules. Tinted with the IPO badge's tokens so the two read
+   as the same fact about the trade. */
+.ipo-block {
+  margin-bottom: var(--section-gap);
+  padding: 13px 15px;
+  border: 1px solid var(--ipo-border);
+  border-radius: var(--r-md);
+  background: var(--ipo-bg);
+}
+.ipo-head { display: flex; flex-direction: column; gap: 3px; margin-bottom: 11px; }
+.ipo-head b { color: var(--ipo-text); font-size: 12.5px; }
+.ipo-block .form-field > label { color: var(--text-dim); }
+
 .badge-ipo {
   margin-left: 7px; border-color: var(--ipo-border); background: var(--ipo-bg); color: var(--ipo-text);
   text-transform: uppercase; letter-spacing: 0.06em;
@@ -670,10 +688,51 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
   text-transform: uppercase;
   color: var(--muted);
 }
-.cashflow-list {
+/* Sector labels ---------------------------------------------------------------------------------
+   A sector is a property of the stock, so a date-ordered journal repeats the same one down the
+   column. The run's first row carries the chip and the rest keep the text but not the noise — the
+   suppression is `opacity`, not removal, so a screen reader still reads every row's sector. */
+.sector-chip {
+  display: inline-block; padding: 2px 8px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .01em; white-space: nowrap;
+  color: var(--text-dim); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 999px;
+}
+.sector-repeat { opacity: 0; }
+
+/* The sector-by-symbol list: a symbol and its count on one line, the picker under it, two per row
+   on a wide dialog and one on a phone. */
+.sector-list {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  max-height: min(52vh, 460px); overflow-y: auto; padding-right: 4px;
+}
+.sector-row {
+  display: grid; gap: 6px; padding: 10px 12px;
+  background: var(--tile); border: 1px solid var(--border); border-radius: var(--r-md);
+}
+.sector-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+
+/* The card shows the latest movement only; the whole ledger lives in the dialog. */
+.cashflow-latest {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 30px;
+}
+/* Two even buttons with the ledger drill-in spanning both, so the row cannot wrap into a stack. */
+.cashflow-actions {
+  margin-top: auto;
+  padding-top: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.cashflow-ledger { grid-column: 1 / -1; justify-content: space-between; }
+.cashflow-actions .btn { padding-left: 10px; padding-right: 10px; }
+.movement-list {
   margin-top: 6px;
-  flex: 1 1 auto;
-  max-height: 208px;
+  max-height: min(46vh, 420px);
   overflow-y: auto;
 }
 .cashflow-row {
@@ -693,8 +752,28 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
 .cashflow-remove:hover { opacity: 1; color: var(--negative); }
 
 .shot-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-.screenshot-wrap { position: relative; }
-.screenshot-delete { position: absolute; top: 8px; right: 8px; background: var(--overlay); backdrop-filter: blur(6px); }
+.shot-figure { margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* A fixed box means a phone-shaped screenshot and a wide chart sit level, and neither can take the
+   page over — the picture is opened at full size instead. */
+.shot-thumb {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 190px; padding: 0; overflow: hidden; cursor: zoom-in;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+  transition: border-color 0.16s ease, transform 0.16s ease;
+}
+.shot-thumb:hover { border-color: var(--border-strong); }
+.shot-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.shot-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.shot-caption { font-size: 11px; line-height: 1.45; }
+
+.shot-view {
+  margin-top: 12px; padding: 10px; display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+}
+.shot-view img { max-width: 100%; max-height: 62vh; object-fit: contain; border-radius: var(--r-sm); }
+/* A picture wants the width a 580px dialog cannot give it. */
+.dialog-wide { width: min(900px, calc(100vw - 32px)); }
+
 
 /* Month / year navigation: arrows, quick pickers and the jump to today. */
 .cal-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -751,26 +830,49 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
   position: sticky; left: 0; z-index: 2; display: flex; align-items: center;
   background: var(--panel); font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums;
 }
-.year-cell {
+/* The sector sentiment strip is the same cell as the year strip — same size, same tone scale, same
+   "—" for a month with nothing in it — so the two read as one language. Only the columns differ:
+   a sector per row instead of a year. */
+.year-cell, .ss-cell {
   display: flex; flex-direction: column; gap: 2px; padding: 9px 10px;
   border: 1px solid var(--cal-border); border-radius: var(--r-md); background: var(--cal-cell);
   font: inherit; color: inherit; text-align: left; cursor: pointer;
   transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
 }
-button.year-cell:hover { border-color: var(--cal-hover); transform: translateY(-1px); }
-button.year-cell:disabled { cursor: default; }
+button.year-cell:hover, button.ss-cell:hover { border-color: var(--cal-hover); transform: translateY(-1px); }
+button.year-cell:disabled, button.ss-cell:disabled { cursor: default; }
 /* Two classes, so the tone wins over the base cell background whatever the rule order. */
-.year-cell.calendar-positive { background: var(--cal-positive); }
-.year-cell.calendar-negative { background: var(--cal-negative); }
-.year-pnl { font-size: 11.5px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.year-cell.calendar-positive, .ss-cell.ss-positive { background: var(--cal-positive); }
+.year-cell.calendar-negative, .ss-cell.ss-negative { background: var(--cal-negative); }
+.year-pnl, .ss-pnl { font-size: 11.5px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* The figure takes the tone colour too, like the day cells above. */
-.year-cell.calendar-positive .year-pnl { color: var(--positive); }
-.year-cell.calendar-negative .year-pnl { color: var(--negative); }
-.year-count { font-size: 9.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.year-empty { font-size: 11px; color: var(--muted); }
-.year-off { opacity: 0.5; }
-.year-current { box-shadow: inset 0 0 0 1px var(--accent); }
-.year-total { border-color: var(--border-strong); }
+.year-cell.calendar-positive .year-pnl, .ss-cell.ss-positive .ss-pnl { color: var(--positive); }
+.year-cell.calendar-negative .year-pnl, .ss-cell.ss-negative .ss-pnl { color: var(--negative); }
+.year-count, .ss-count { font-size: 9.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.year-empty, .ss-empty { font-size: 11px; color: var(--muted); }
+.year-off, .ss-off { opacity: 0.5; }
+.year-current, .ss-now { box-shadow: inset 0 0 0 1px var(--accent); }
+.year-total, .ss-total { border-color: var(--border-strong); }
+
+/* ================================== sector sentiment (sectors down, months across) */
+.ss-scroll { margin-top: 14px; overflow-x: auto; padding-bottom: 4px; }
+.ss-grid { display: grid; grid-template-columns: 1fr; gap: 6px; min-width: max-content; }
+/* Columns are set inline, because how many months the window holds is the reader's choice. */
+.ss-row { display: grid; gap: 6px; }
+.ss-head-cell, .ss-month {
+  display: flex; align-items: center; padding: 4px 0;
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint);
+}
+.ss-month { justify-content: center; }
+/* Sticky so the sector stays readable while the strip scrolls sideways, like the year label. */
+.ss-label {
+  position: sticky; left: 0; z-index: 2; display: flex; flex-direction: column; justify-content: center; gap: 1px;
+  background: var(--panel); padding-right: 10px; min-width: 0;
+}
+.ss-label b { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-spark { display: flex; align-items: center; min-width: 0; }
+/* The card's own sparkline carries a top margin that a table row has no room for. */
+.ss-spark .stat-spark { margin-top: 0; width: 100%; }
 
 /* ============================================== calendar day pop-up (modal) */
 .modal-backdrop {

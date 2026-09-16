@@ -8,10 +8,11 @@ import { PageHeader } from "@/components/page-header";
 import { ConfirmButton } from "@/components/confirm-button";
 import { LoadError } from "@/components/load-error";
 import { Badge } from "@/components/ui/badge";
+import { ScreenshotGallery } from "@/components/screenshot-gallery";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { describeLeg } from "@/lib/fees";
-import { embedAccount, embedStrategy, formatDuration, formatMoney, formatNumber, formatPrice, formatR, normalizeTrade, shortDateTime } from "@/lib/trading";
+import { describeIpo, describeLeg, ipoTitle } from "@/lib/fees";
+import { embedAccount, embedStrategy, formatDuration, formatLots, formatMoney, formatPrice, formatR, normalizeTrade, shortDateTime } from "@/lib/trading";
 
 export default function Detail() {
   const { id } = useParams<{ id: string }>();
@@ -54,14 +55,17 @@ export default function Detail() {
   const gross = Number(t.gross_pnl || 0);
   const net = Number(t.net_pnl || 0);
   const totalCharges = Number(t.commission || 0) + Number(t.swap || 0) + Number(t.fees || 0);
-  const qty = formatNumber(t.position_size, 0);
+  const lots = formatLots(t.position_size, { shares: false });
   const entryValue = Number(t.position_size || 0) * Number(t.entry_price || 0);
   const exitValue = Number(t.position_size || 0) * Number(t.exit_price || 0);
 
   return <div className="content max-w-[1100px]">
     <PageHeader
       eyebrow="Journal / Trade"
-      title={<>{t.symbol}{t.is_ipo && <Badge variant="ipo" className="ml-2">IPO</Badge>}</>}
+      title={<>{t.symbol}{t.is_ipo && <Badge variant="ipo" className="ml-2">IPO</Badge>}
+        {/* The sector sits with the ticker, because it is a fact about the stock rather than
+            about this trade — and it is what the analytics chart is grouped by. */}
+        {t.sector && <Badge variant="outline" className="ml-2">{t.sector}</Badge>}</>}
       subtitle={shortDateTime(t.entry_at)}
       actions={<>
         <Button variant="secondary" onClick={() => router.push("/journal")}>Back</Button>
@@ -83,10 +87,11 @@ export default function Detail() {
       <Tile label="R Multiple (net)" value={t.r_multiple == null ? "—" : formatR(t.r_multiple)} tone={Number(t.r_multiple) >= 0 ? "positive" : "negative"} />
     </div>
 
-    <div className="grid three">
+    <div className="grid four">
       <Tile label="Risk" value={t.risk_amount == null ? "—" : formatMoney(t.risk_amount, currency)} />
-      <Tile label={`Contract Value · ${qty} shares`} value={`${formatMoney(entryValue, currency)} → ${formatMoney(exitValue, currency)}`} />
+      <Tile label={`Contract Value · ${lots}`} value={`${formatMoney(entryValue, currency)} → ${formatMoney(exitValue, currency)}`} />
       <Tile label="Holding Time" value={t.exit_at ? formatDuration(t.entry_at, t.exit_at) : "Open"} />
+      <Tile label="Sector" value={t.sector || "—"} />
     </div>
 
     <div className="grid two">
@@ -100,7 +105,7 @@ export default function Detail() {
             <Field label="Broker" value={t.fee_breakdown?.brokerName} />
             <Field label="Entry" value={formatPrice(t.entry_price, currency)} />
             <Field label="Exit" value={formatPrice(t.exit_price, currency)} />
-            <Field label="Position" value={`${qty} shares`} />
+            <Field label="Position" value={formatLots(t.position_size)} />
             <Field label="Stop Loss" value={formatPrice(t.stop_loss, currency)} />
             <Field label="Take Profit" value={formatPrice(t.take_profit, currency)} />
             <Field label="Session" value={t.session} />
@@ -133,7 +138,11 @@ export default function Detail() {
       <CardHeader><CardTitle>Charges</CardTitle></CardHeader>
       <CardContent>
         <div className="fee-breakdown">
-          <div className="fee-row"><span className="muted">Opening contract {formatMoney(entryValue, currency)}</span><span>{legText(t.fee_breakdown?.open, currency)}</span></div>
+          {t.fee_breakdown?.ipo ? (
+            <div className="fee-row"><span className="muted">Subscription · {ipoTitle(t.fee_breakdown.ipo)}</span><span>{describeIpo(t.fee_breakdown.ipo, value => formatMoney(value, currency))}</span></div>
+          ) : (
+            <div className="fee-row"><span className="muted">Opening contract {formatMoney(entryValue, currency)}</span><span>{legText(t.fee_breakdown?.open, currency)}</span></div>
+          )}
           <div className="fee-row"><span className="muted">Closing contract {formatMoney(exitValue, currency)}</span><span>{legText(t.fee_breakdown?.close, currency)}</span></div>
           <div className="fee-row"><span className="muted">Commission (brokerage + platform + SST)</span><span>{formatMoney(t.commission, currency)}</span></div>
           <div className="fee-row"><span className="muted">Exchange fees (clearing + stamp duty)</span><span>{formatMoney(t.fees, currency)}</span></div>
@@ -153,7 +162,7 @@ export default function Detail() {
     <Card>
       <CardHeader><CardTitle>Screenshots</CardTitle></CardHeader>
       <CardContent>
-        {shots.length ? <div className="shot-grid">{shots.map((x: any) => <Screenshot key={x.id} path={x.storage_path} />)}</div> : <div className="empty">No screenshots.</div>}
+        <ScreenshotGallery shots={shots} />
       </CardContent>
     </Card>
   </div>;
@@ -172,8 +181,4 @@ function legText(leg: any, currency?: string | null) {
   return describeLeg(leg, value => formatMoney(value, currency));
 }
 
-function Screenshot({ path }: { path: string }) {
-  const [uri, setUri] = useState("");
-  useEffect(() => { createClient().storage.from("trade-screenshots").createSignedUrl(path, 3600).then(({ data }) => setUri(data?.signedUrl ?? "")) }, [path]);
-  return uri ? <img src={uri} alt="Trade screenshot" className="w-full rounded-xl border border-[var(--border)]" /> : <div className="muted">Loading image…</div>;
-}
+

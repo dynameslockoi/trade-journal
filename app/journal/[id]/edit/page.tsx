@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { BURSA_BOARD_LOT, SESSIONS, calculateGrossPnl, calculateRisk, formatMoney, formatR, localDatetimeToIso, numberOrNull, roundMoney, sessionBucket, sessionLabel, stripUnknownColumn, toLocalDatetimeInput } from "@/lib/trading";
+import { BURSA_SECTORS, SESSIONS, calculateGrossPnl, calculateRisk, formatLots, formatMoney, formatR, localDatetimeToIso, lotsToShares, numberOrNull, roundMoney, sessionBucket, sessionLabel, sharesToLots, stripUnknownColumn, toLocalDatetimeInput } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
 import { ScreenshotInput } from "@/components/screenshot-input";
+import { ScreenshotGallery } from "@/components/screenshot-gallery";
 import { LoadError, firstError } from "@/components/load-error";
-import { ConfirmButton } from "@/components/confirm-button";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,13 +17,33 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SELECT_NONE } from "@/components/ui/select";
-import { BROKER_PRESETS, DEFAULT_BROKER_ID, SHARES, brokerPreset, describeLeg, roundTripFees, type AssetClass, type FeeBreakdown } from "@/lib/fees";
+import { BROKER_PRESETS, DEFAULT_BROKER_ID, SHARES, brokerPreset, describeIpo, describeLeg, ipoChannelForBroker, ipoTitle, roundTripFees, type AssetClass, type FeeBreakdown } from "@/lib/fees";
+import { IpoSubscription, defaultIpoState, ipoInputs, ipoStateFromStored, type IpoState } from "@/components/ipo-subscription";
 
 type Account = { id: string; name: string; broker?: string | null };
 type Tag = { id: string; name: string; category: string | null };
 
 const psychology = { session: SESSIONS, emotion: ["Calm", "Confident", "Uncertain", "Fearful", "FOMO", "Greedy", "Revenge"], mistake: ["No mistake", "FOMO", "Early entry", "Late exit", "Oversized", "Moved SL", "Overtrading", "Ignored plan"] };
 const numericFields = ["entry_price", "exit_price", "position_size", "stop_loss", "take_profit", "gross_pnl", "commission", "swap", "fees", "risk_percent", "setup_quality", "execution_quality", "discipline", "mae", "mfe"];
+
+/**
+ * The figures a trade's money is derived from — nothing else on this form can change what it earned.
+ *
+ * Gross P&L and charges are recomputed from the prices as you edit, which quietly replaced figures
+ * that came from a spreadsheet the first time a trade was opened and saved, even when the save was
+ * only made to attach a screenshot: a price kept to two decimals re-multiplied by the share count
+ * answers a slightly different sum than the one the diary recorded. So the stored figures are kept
+ * until one of these actually moves.
+ */
+const MONEY_FIELDS = ["entry_price", "exit_price", "position_size", "stop_loss", "take_profit", "commission", "fees", "swap"] as const;
+/** What gross P&L is worked out from. */
+const GROSS_FIELDS = ["entry_price", "exit_price", "position_size"] as const;
+/** What risk and R are worked out from — the stop, rather than the exit. Clearing the risk amount is
+ * how a trade asks for it to be derived from the stop, so that counts as a change too. */
+const RISK_FIELDS = ["entry_price", "stop_loss", "position_size", "risk_amount"] as const;
+
+/** The subscription terms as one comparable string — what a save compares to decide the charges. */
+const ipoKey = (state: IpoState) => [state.channel, state.method, state.multiple, state.financed, state.days].join("|");
 
 const money = (v: number | null) => formatMoney(v);
 
@@ -43,6 +63,19 @@ export default function EditTrade() {
   const [autoCalc, setAutoCalc] = useState(true);
   const [sstOverride, setSstOverride] = useState("");
   const [lots, setLots] = useState("");
+  const [sectorFrom, setSectorFrom] = useState("");
+  // Only used when this trade is flagged as an IPO allocation; idle otherwise.
+  const [ipo, setIpo] = useState<IpoState>(() => defaultIpoState(DEFAULT_BROKER_ID));
+  const baseline = useRef<{
+    fields: Record<string, number | null>;
+    broker: string;
+    intraday: boolean;
+    sst: string;
+    autoCalc: boolean;
+    /** The subscription terms as stored, so changing one counts as a change to the charges. */
+    ipo: string;
+    isIpo: boolean;
+  } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -68,11 +101,30 @@ export default function EditTrade() {
       setTags((tg.data ?? []) as Tag[]);
       setSelectedTags((tt.data ?? []).map((x: any) => x.tag_id));
       setShots(sh.data ?? []);
+      // The stored size is shares; the field shows the lots it was entered as.
+      const storedLots = sharesToLots(row.position_size);
+      setLots(storedLots === null ? "" : String(storedLots));
       // Reuse the broker and cost settings the trade was recorded with.
       const stored = row.fee_breakdown ?? null;
-      setBroker(stored?.broker ?? (a.data ?? []).find((x: any) => x.id === row.account_id)?.broker ?? DEFAULT_BROKER_ID);
+      const brokerId = stored?.broker ?? (a.data ?? []).find((x: any) => x.id === row.account_id)?.broker ?? DEFAULT_BROKER_ID;
+      const sst = stored?.sstRate === null || stored?.sstRate === undefined ? "" : String(Number(stored.sstRate) * 100);
+      // What the trade recorded about its subscription, so the form reopens on the same terms.
+      const ipoState = ipoStateFromStored(stored?.ipo, brokerId);
+      // The snapshot the save compares against. Set before `setForm`, so the render the form's own
+      // update causes already sees it.
+      baseline.current = {
+        fields: Object.fromEntries(MONEY_FIELDS.map(k => [k, numberOrNull(row[k])])),
+        broker: brokerId,
+        intraday: Boolean(stored?.intraday),
+        sst,
+        autoCalc: true,
+        ipo: ipoKey(ipoState),
+        isIpo: Boolean(row.is_ipo),
+      };
+      setBroker(brokerId);
       setIntraday(Boolean(stored?.intraday));
-      setSstOverride(stored?.sstRate === null || stored?.sstRate === undefined ? "" : String(Number(stored.sstRate) * 100));
+      setSstOverride(sst);
+      setIpo(ipoState);
     })();
   }, [id]);
 
@@ -83,13 +135,20 @@ export default function EditTrade() {
   const parsedSst = sstOverride.trim() === "" ? null : Number(sstOverride) / 100;
   const sstRate = parsedSst !== null && Number.isFinite(parsedSst) ? parsedSst : null;
 
+  const quantity = numberOrNull(form?.position_size);
+  const entryValue = quantity && quantity > 0 ? roundMoney(quantity * (numberOrNull(form?.entry_price) ?? 0)) : 0;
+  // What the allocation is applied for, which is what a financing tier borrows a share of.
+  const ipoTerms = useMemo(() => ipoInputs(ipo, entryValue), [ipo, entryValue]);
+
   const fees: FeeBreakdown = useMemo(
     () => roundTripFees(preset, form?.entry_price, form?.exit_price, form?.position_size, {
       assetClass,
       intraday: intraday && preset.market === "bursa",
       sstRate,
+      // A subscription replaces the opening leg outright, so this is only priced on an IPO trade.
+      ipo: form?.is_ipo ? ipoTerms : null,
     }),
-    [preset, form?.entry_price, form?.exit_price, form?.position_size, assetClass, intraday, sstRate]
+    [preset, form?.entry_price, form?.exit_price, form?.position_size, assetClass, intraday, sstRate, form?.is_ipo, ipoTerms]
   );
 
   const autoGross = useMemo(
@@ -104,12 +163,52 @@ export default function EditTrade() {
   const swap = Number(form?.swap || 0);
   const netPnl = roundMoney(grossPnl - commission - exchangeFees - swap);
 
-  const quantity = numberOrNull(form?.position_size);
-  const entryValue = quantity && quantity > 0 ? roundMoney(quantity * (numberOrNull(form?.entry_price) ?? 0)) : 0;
+  /**
+   * Which figures the money is derived from have been edited. Each group is decided on its own inputs,
+   * so fixing a stop loss recalculates the risk and the R without also rewriting a gross P&L that the
+   * prices did not change — and a note, a tag, a sector or a screenshot moves nothing at all.
+   */
+  const keep = useMemo(() => {
+    const base = baseline.current;
+    // No snapshot yet (still loading) — behave as the form always has.
+    const none = { gross: false, charges: false, risk: false };
+    if (!base || form == null) return none;
+    // Turning auto-calculate off or on is itself a request to recalculate.
+    if (autoCalc !== base.autoCalc) return none;
+    const moved = (keys: readonly string[]) => keys.some(k => numberOrNull(form[k]) !== base.fields[k]);
+    // Gross comes from the prices and the size; the charges add the broker and its cost settings,
+    // and on an IPO trade the subscription terms stand in for the opening leg entirely.
+    const priceMoved = moved(GROSS_FIELDS);
+    const chargesMoved = priceMoved
+      || broker !== base.broker || intraday !== base.intraday || sstOverride.trim() !== base.sst
+      || Boolean(form.is_ipo) !== base.isIpo || ipoKey(ipo) !== base.ipo;
+    return { gross: !priceMoved, charges: !chargesMoved, risk: !moved(RISK_FIELDS) };
+  }, [form, broker, intraday, sstOverride, autoCalc, ipo]);
+
+  // Everything shown below is what a save writes: the recorded figures while nothing has moved, the
+  // recalculated ones once something has.
+  const shownGross = keep.gross ? numberOrNull(form?.gross_pnl) ?? 0 : grossPnl;
+  const shownCommission = keep.charges ? numberOrNull(form?.commission) ?? 0 : commission;
+  const shownExchange = keep.charges ? numberOrNull(form?.fees) ?? 0 : exchangeFees;
+  const shownCharges = roundMoney(shownCommission + shownExchange);
+  const shownNet = roundMoney(shownGross - shownCharges - swap);
+  // The stored breakdown describes the recorded charges; a row saved before that column existed has
+  // none, and then the calculated legs are the only description available.
+  const recordedBreakdown: FeeBreakdown | null = form?.fee_breakdown ?? null;
+  const panelFees = keep.charges && recordedBreakdown ? recordedBreakdown : fees;
+
   const exitValue = quantity && quantity > 0 ? roundMoney(quantity * (numberOrNull(form?.exit_price) ?? 0)) : 0;
   const risk = useMemo(() => (form ? calculateRisk(form.entry_price, form.stop_loss, form.position_size, form.risk_amount) : null), [form?.entry_price, form?.stop_loss, form?.position_size, form?.risk_amount]);
-  const rGross = risk && risk > 0 ? grossPnl / risk : null;
-  const rNet = risk && risk > 0 ? netPnl / risk : null;
+  const shownRisk = keep.risk ? numberOrNull(form?.risk_amount) : risk;
+  // R only has a recorded value to keep where the trade has one: a row saved without it gets the
+  // computed figure, because filling a blank is not the same as overwriting a record.
+  const keepR = keep.gross && keep.risk && numberOrNull(form?.r_multiple) !== null;
+  const rGross = shownRisk && shownRisk > 0 ? shownGross / shownRisk : null;
+  const rNet = keepR ? numberOrNull(form?.r_multiple) : (shownRisk && shownRisk > 0 ? shownNet / shownRisk : null);
+  // Worth naming when the recorded figures and the recorded prices disagree: that is the difference a
+  // save used to write over without being asked.
+  const recalcsDifferently = keep.gross && keep.charges
+    && (Math.abs(grossPnl - shownGross) > 0.005 || Math.abs(roundMoney(commission + exchangeFees) - shownCharges) > 0.005);
 
   function pickAccount(nextId: string) {
     set("account_id", nextId);
@@ -119,8 +218,25 @@ export default function EditTrade() {
 
   function updateLots(value: string) {
     setLots(value);
-    const n = Number(value);
-    if (value.trim() !== "" && Number.isFinite(n) && n > 0) set("position_size", String(n * BURSA_BOARD_LOT));
+    const shares = lotsToShares(value);
+    set("position_size", shares === null ? "" : String(shares));
+  }
+
+  /** See the new-trade form: a symbol's sector is carried over rather than picked again. */
+  async function fillSectorFromHistory() {
+    const sym = String(form?.symbol || "").trim().toUpperCase();
+    if (!sym || form?.sector) return;
+    const { data } = await createClient()
+      .from("trades")
+      .select("sector")
+      .eq("symbol", sym)
+      .not("sector", "is", null)
+      .order("entry_at", { ascending: false })
+      .limit(1);
+    const known = data?.[0]?.sector;
+    if (!known) return;
+    setForm((x: any) => (String(x.symbol || "").trim().toUpperCase() === sym && !x.sector ? { ...x, sector: known } : x));
+    setSectorFrom(sym);
   }
 
   async function removeScreenshot(shot: any) {
@@ -142,6 +258,7 @@ export default function EditTrade() {
 
     const payload: any = {
       symbol: String(form.symbol || "").trim().toUpperCase(),
+      sector: form.sector || null,
       account_id: form.account_id || null,
       strategy_id: form.strategy_id || null,
       direction: form.direction || "long",
@@ -153,19 +270,21 @@ export default function EditTrade() {
       mistake: form.mistake || null,
       notes: form.notes || null,
       is_ipo: Boolean(form.is_ipo),
-      gross_pnl: grossPnl,
-      commission,
       swap,
-      fees: exchangeFees,
       risk_amount: risk,
-      r_multiple: rNet,
-      fee_breakdown: { ...fees, broker: preset.id, brokerName: preset.name },
+      // Keeping the recorded fees keeps the record of how they were worked out with them.
+      fee_breakdown: keep.charges && recordedBreakdown ? recordedBreakdown : { ...fees, broker: preset.id, brokerName: preset.name },
     };
     for (const key of numericFields) payload[key] = numberOrNull(form[key]);
-    payload.gross_pnl = grossPnl;
-    payload.commission = commission;
+    // The money is settled here, once, after the numeric coercion — so there is one place that
+    // decides it. A kept value is written back exactly as recorded: a null stays null rather than
+    // becoming a zero, which would read as "this trade broke even".
+    payload.gross_pnl = keep.gross ? numberOrNull(form.gross_pnl) : shownGross;
+    payload.commission = keep.charges ? numberOrNull(form.commission) : shownCommission;
     payload.swap = swap;
-    payload.fees = exchangeFees;
+    payload.fees = keep.charges ? numberOrNull(form.fees) : shownExchange;
+    payload.risk_amount = keep.risk ? numberOrNull(form.risk_amount) : shownRisk;
+    payload.r_multiple = keepR ? numberOrNull(form.r_multiple) : rNet;
 
     if (!payload.symbol || !payload.entry_at) { setError("Symbol and entry date/time are required."); setSaving(false); return; }
     if (payload.exit_at && new Date(payload.exit_at) < new Date(payload.entry_at)) { setError("Exit time cannot be before entry time."); setSaving(false); return; }
@@ -219,18 +338,38 @@ export default function EditTrade() {
             <div className="grid three">
               <div className="form-field">
                 <Label htmlFor="et-symbol">Symbol</Label>
-                <Input id="et-symbol" required value={form.symbol || ""} onChange={e => set("symbol", e.target.value.toUpperCase())} />
+                <Input id="et-symbol" required value={form.symbol || ""} onChange={e => set("symbol", e.target.value.toUpperCase())} onBlur={fillSectorFromHistory} />
               </div>
-              {([["entry_price", "Entry Price"], ["exit_price", "Exit Price"], ["position_size", "Position Size (shares)"], ["stop_loss", "Stop Loss"], ["take_profit", "Take Profit"]] as const).map(([k, l]) => (
+              <div className="form-field">
+                <Label htmlFor="et-sector">Sector</Label>
+                <Select
+                  value={form.sector || SELECT_NONE}
+                  onValueChange={v => { set("sector", v === SELECT_NONE ? "" : v); setSectorFrom(""); }}
+                >
+                  <SelectTrigger id="et-sector"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SELECT_NONE}>Not set</SelectItem>
+                    {BURSA_SECTORS.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {sectorFrom && <span className="muted text-[10px]">from your last {sectorFrom} trade</span>}
+              </div>
+              {([["entry_price", "Entry Price"], ["exit_price", "Exit Price"]] as const).map(([k, l]) => (
                 <div className="form-field" key={k}>
                   <Label htmlFor={`et-${k}`}>{l}</Label>
                   <Input id={`et-${k}`} type="number" step="any" value={form[k] ?? ""} onChange={e => set(k, e.target.value)} />
                 </div>
               ))}
               <div className="form-field">
-                <Label htmlFor="et-lots">Board Lots ×{BURSA_BOARD_LOT}</Label>
-                <Input id="et-lots" type="number" step="any" min="0" value={lots} onChange={e => updateLots(e.target.value)} placeholder="optional helper" />
+                <Label htmlFor="et-lots">Position Lot</Label>
+                <Input id="et-lots" type="number" step="any" min="0" value={lots} onChange={e => updateLots(e.target.value)} placeholder="e.g. 50" />
               </div>
+              {([["stop_loss", "Stop Loss"], ["take_profit", "Take Profit"]] as const).map(([k, l]) => (
+                <div className="form-field" key={k}>
+                  <Label htmlFor={`et-${k}`}>{l}</Label>
+                  <Input id={`et-${k}`} type="number" step="any" value={form[k] ?? ""} onChange={e => set(k, e.target.value)} />
+                </div>
+              ))}
               <div className="form-field">
                 <Label htmlFor="et-entry">Entry Date/Time</Label>
                 <DateTimePicker id="et-entry" value={form.entry_at || ""} onChange={v => set("entry_at", v)} />
@@ -261,11 +400,16 @@ export default function EditTrade() {
               </div>
             </div>
             <div className="review-label mt-3">
-              <Checkbox id="et-ipo" checked={!!form.is_ipo} onCheckedChange={v => set("is_ipo", !!v)} />
-              <Label htmlFor="et-ipo">IPO allocation <span className="muted">— bought through an IPO allotment, not the open market</span></Label>
+              <Checkbox id="et-ipo" checked={!!form.is_ipo} onCheckedChange={v => {
+                set("is_ipo", !!v);
+                // The channel defaults from the broker in use, because subscribing through M+ Global
+                // or Moomoo means the journal already knows where the application went.
+                if (v) setIpo(x => ({ ...x, channel: ipoChannelForBroker(broker) }));
+              }} />
+              <Label htmlFor="et-ipo">IPO allocation <span className="muted">— an allotment rather than a market buy, so its subscription is priced in Fees &amp; Charges below instead of the opening contract</span></Label>
             </div>
             <div className="calc-strip">
-              <span className="muted">Contract {money(entryValue)} → {money(exitValue)} · Bursa board lot is {BURSA_BOARD_LOT} shares</span>
+              <span className="muted">Contract {money(entryValue)} → {money(exitValue)} · {formatLots(form.position_size)}</span>
             </div>
           </CardContent>
         </Card>
@@ -273,6 +417,15 @@ export default function EditTrade() {
         <Card>
           <CardHeader><CardTitle>Fees &amp; Charges</CardTitle></CardHeader>
           <CardContent>
+            {form.is_ipo && fees.ipo ? (
+              <IpoSubscription
+                idPrefix="et"
+                state={ipo}
+                onChange={setIpo}
+                charge={fees.ipo}
+                contractValue={entryValue}
+              />
+            ) : null}
             <div className="flex flex-wrap items-end gap-3">
               <div className="form-field flex-[1_1_240px]">
                 <Label htmlFor="et-broker">Broker preset</Label>
@@ -303,23 +456,27 @@ export default function EditTrade() {
             </div>
 
             <div className="fee-panel">
-              <div className="fee-row"><span className="muted">Opening contract {money(entryValue)}</span><span>{describeLeg(fees.open, formatMoney)}</span></div>
-              <div className="fee-row"><span className="muted">Closing contract {money(exitValue)}</span><span>{describeLeg(fees.close, formatMoney)}</span></div>
-              <div className="fee-row fee-total"><span>Total charges</span><span>{money(fees.total)}</span></div>
+              {fees.ipo ? (
+                <div className="fee-row"><span className="muted">Subscription · {ipoTitle(fees.ipo)}</span><span>{describeIpo(fees.ipo, formatMoney)}</span></div>
+              ) : (
+                <div className="fee-row"><span className="muted">Opening contract {money(entryValue)}</span><span>{describeLeg(panelFees.open, formatMoney)}</span></div>
+              )}
+              <div className="fee-row"><span className="muted">Closing contract {money(exitValue)}</span><span>{describeLeg(panelFees.close, formatMoney)}</span></div>
+              <div className="fee-row fee-total"><span>Total charges</span><span>{money(shownCharges)}</span></div>
             </div>
 
             <div className="grid three gap-3 mt-3.5">
               <div className="form-field">
                 <Label htmlFor="et-gross">Gross P&amp;L</Label>
-                <Input id="et-gross" type="number" step="any" readOnly={autoCalc} value={autoCalc ? String(grossPnl) : form.gross_pnl ?? ""} onChange={e => set("gross_pnl", e.target.value)} />
+                <Input id="et-gross" type="number" step="any" readOnly={autoCalc || keep.gross} value={autoCalc || keep.gross ? String(shownGross) : form.gross_pnl ?? ""} onChange={e => set("gross_pnl", e.target.value)} />
               </div>
               <div className="form-field">
                 <Label htmlFor="et-commission">Commission (brokerage + platform + SST)</Label>
-                <Input id="et-commission" type="number" step="any" readOnly={autoCalc} value={autoCalc ? String(commission) : form.commission ?? ""} onChange={e => set("commission", e.target.value)} />
+                <Input id="et-commission" type="number" step="any" readOnly={autoCalc || keep.charges} value={autoCalc || keep.charges ? String(shownCommission) : form.commission ?? ""} onChange={e => set("commission", e.target.value)} />
               </div>
               <div className="form-field">
                 <Label htmlFor="et-fees">Exchange fees (clearing + stamp duty)</Label>
-                <Input id="et-fees" type="number" step="any" readOnly={autoCalc} value={autoCalc ? String(exchangeFees) : form.fees ?? ""} onChange={e => set("fees", e.target.value)} />
+                <Input id="et-fees" type="number" step="any" readOnly={autoCalc || keep.charges} value={autoCalc || keep.charges ? String(shownExchange) : form.fees ?? ""} onChange={e => set("fees", e.target.value)} />
               </div>
             </div>
             <div className="grid three gap-3">
@@ -339,11 +496,24 @@ export default function EditTrade() {
               </div>
             </div>
             <div className="calc-strip">
-              <span>Risk: <b>{formatMoney(risk)}</b></span>
-              <span>Gross: <b className={profitClass(grossPnl)}>{formatMoney(grossPnl, null, true)}</b></span>
-              <span>Net after charges: <b className={profitClass(netPnl)}>{formatMoney(netPnl, null, true)}</b></span>
+              <span>Risk: <b>{formatMoney(shownRisk)}</b></span>
+              <span>Gross: <b className={profitClass(shownGross)}>{formatMoney(shownGross, null, true)}</b></span>
+              <span>Net after charges: <b className={profitClass(shownNet)}>{formatMoney(shownNet, null, true)}</b></span>
               <span>R (net): <b className={rNet === null ? "" : profitClass(rNet)}>{rNet === null ? "—" : formatR(rNet)}</b></span>
               <span>R (gross): <b className={rGross === null ? "" : profitClass(rGross)}>{rGross === null ? "—" : formatR(rGross)}</b></span>
+            </div>
+            {/* The form must say which of the two it is about to write, because a read-only figure
+                gives no clue on its own — and when the two differ, it says by how much, since that
+                difference is the reason a figure recorded elsewhere would otherwise move. */}
+            <div className="muted text-[10px] mt-2">
+              {keep.gross && keep.charges ? <>
+                Keeping the figures recorded with this trade — <b>{formatMoney(shownGross, null, true)}</b> gross, <b>{formatMoney(shownCharges)}</b> charges. Change a price, the position lot, a fee or the broker to recalculate.
+                {recalcsDifferently && <> The prices as stored work out to {formatMoney(grossPnl, null, true)} gross and {formatMoney(roundMoney(commission + exchangeFees))} charges.</>}
+              </> : keep.gross ? <>
+                Keeping the recorded gross P&amp;L <b>{formatMoney(shownGross, null, true)}</b>; the charges are recalculated from the {preset.name} preset — <b>{formatMoney(shownCharges)}</b>.
+              </> : <>
+                Recalculated from the prices, the position and the broker preset — <b>{formatMoney(shownGross, null, true)}</b> gross, <b>{formatMoney(shownCharges)}</b> charges.
+              </>}
             </div>
           </CardContent>
         </Card>
@@ -409,9 +579,7 @@ export default function EditTrade() {
         <Card>
           <CardHeader><CardTitle>Screenshots</CardTitle></CardHeader>
           <CardContent>
-            {shots.length ? (
-              <div className="shot-grid">{shots.map(shot => <ScreenshotItem key={shot.id} shot={shot} onDelete={removeScreenshot} />)}</div>
-            ) : <div className="muted">No screenshots attached.</div>}
+            <ScreenshotGallery shots={shots} onRemove={removeScreenshot} />
             <ScreenshotInput files={files} onChange={setFiles} />
           </CardContent>
         </Card>
@@ -426,22 +594,4 @@ export default function EditTrade() {
   );
 }
 
-function ScreenshotItem({ shot, onDelete }: { shot: any; onDelete: (shot: any) => void }) {
-  const [uri, setUri] = useState("");
-  useEffect(() => { createClient().storage.from("trade-screenshots").createSignedUrl(shot.storage_path, 3600).then(({ data }) => setUri(data?.signedUrl ?? "")); }, [shot.storage_path]);
-  return (
-    <div className="screenshot-wrap">
-      {uri ? <img src={uri} alt={shot.caption || "Trade screenshot"} className="w-full rounded-[10px] border border-[var(--border)]" /> : <div className="muted">Loading image…</div>}
-      <ConfirmButton
-        size="sm"
-        className="screenshot-delete"
-        title="Remove this screenshot?"
-        description="The image is deleted from storage as well as from this trade."
-        confirmLabel="Remove"
-        onConfirm={() => onDelete(shot)}
-      >
-        Remove
-      </ConfirmButton>
-    </div>
-  );
-}
+

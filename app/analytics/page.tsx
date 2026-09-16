@@ -9,14 +9,20 @@ import { LoadError, firstError } from "@/components/load-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CHART, axisProps, barCursor, gridProps, pnlColor, tooltipProps } from "@/components/chart-theme";
+import { SectorSentiment } from "@/components/sector-sentiment";
+import { toast } from "sonner";
 import {
   bestStreak, calculateStats, capitalBehind, capitalByAccount, embedStrategy, formatMoney, holdingBucket, HOLDING_BUCKETS, HOUR_BUCKETS, hourBucket,
   hourSession, LOTS_BUCKETS, lotsBucket, myParts, normalizeTrade, numberOrNull, QUALITY_BUCKETS,
-  percentOf, qualityBucket, SESSION_WINDOWS, type CashFlow, type Trade,
+  percentOf, qualityBucket, SECTOR_UNSET, sectorOf, SESSION_WINDOWS, type CashFlow, type Trade,
 } from "@/lib/trading";
 
 type GroupRow = { name: string; trades: number; pnl: number; wins: number; winRate: number; avg: number; order: number };
-type GroupKey = "strategy" | "session" | "symbol" | "weekday" | "hour" | "holding" | "lots" | "quality";
+type GroupKey = "strategy" | "sector" | "session" | "symbol" | "weekday" | "hour" | "holding" | "lots" | "quality" | "ipo";
+
+/** How a trade came to you. The journal flags an allocation rather than its opposite, so the label
+ * has to be derived; the order here is the axis order. */
+const IPO_ORIGINS = ["Open market", "IPO allocation"] as const;
 
 /**
  * The banded dimensions draw a fixed axis: a band with no trades keeps its slot, so the chart does
@@ -27,6 +33,9 @@ const BANDS: Partial<Record<GroupKey, readonly string[]>> = {
   holding: HOLDING_BUCKETS,
   lots: LOTS_BUCKETS,
   quality: QUALITY_BUCKETS,
+  // Two slots, always both drawn: the open market first, then the allocations, so the comparison
+  // reads left to right even before the first IPO is recorded.
+  ipo: IPO_ORIGINS,
 };
 
 /**
@@ -57,6 +66,8 @@ function bandOf(t: Trade, key: GroupKey): { name: string; order: number } {
     : key === "holding" ? holdingBucket(t.entry_at, t.exit_at)
     : key === "lots" ? lotsBucket(t.position_size)
     : key === "quality" ? qualityBucket(t)
+    : key === "ipo" ? (t.is_ipo ? IPO_ORIGINS[1] : IPO_ORIGINS[0])
+    : key === "sector" ? sectorOf(t)
     : String((t as any)[key] ?? "Unassigned");
   // Weekdays sort Monday-first; bands follow their list; the rest keep insertion order.
   const order = key === "weekday" ? (date.getUTCDay() + 6) % 7 : BANDS[key]?.indexOf(name) ?? 0;
@@ -84,7 +95,12 @@ function grouped(ts: Trade[], key: GroupKey): GroupRow[] {
       // Money per trade rather than R: a band is always comparable, even with no stop losses recorded.
       avg: v.trades ? +(v.pnl / v.trades).toFixed(2) : 0,
     }))
-    .sort((a, b) => a.order - b.order);
+    // Sectors are ordered by what they made, because the question is which one pays rather than
+    // which comes first in Bursa's list — and only sectors actually traded are drawn, so the chart
+    // is not mostly empty slots. Unclassified trades stay at the end where they read as a to-do.
+    .sort((a, b) => key === "sector"
+      ? (a.name === SECTOR_UNSET ? 1 : b.name === SECTOR_UNSET ? -1 : b.pnl - a.pnl)
+      : a.order - b.order);
 }
 
 /** Bar chart of P&L per group, green for profit and red for loss. */
@@ -137,13 +153,18 @@ export default function Analytics() {
   useEffect(() => {
     (async () => {
       const s = createClient();
-      const [a, b, c, d, e] = await Promise.all([
-        s.from("trades").select(`id,symbol,direction,entry_at,exit_at,position_size,setup_quality,execution_quality,discipline,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,mae,mfe,${embedStrategy()},trade_tags(tag_id)`).order("entry_at"),
+      // `sector` arrives with supabase/sectors.sql; without it the charts still draw, with every
+      // trade unclassified.
+      const TRADE_COLUMNS = `id,symbol,direction,entry_at,exit_at,position_size,setup_quality,execution_quality,discipline,is_ipo,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,mae,mfe,${embedStrategy()},trade_tags(tag_id)`;
+      const WITH_SECTOR = TRADE_COLUMNS.replace("id,", "id,sector,");
+      const [b, c, d, e] = await Promise.all([
         s.from("trading_accounts").select("id,name,currency,starting_balance"),
         s.from("strategies").select("id,name"),
         s.from("tags").select("id,name"),
         s.from("account_cash_flows").select("account_id,kind,amount"),
       ]);
+      let a = await s.from("trades").select(WITH_SECTOR).order("entry_at");
+      if (a.error) a = await s.from("trades").select(TRADE_COLUMNS).order("entry_at");
       setLoadError(firstError(a, b, c, d));
       setFlows(e.error ? null : ((e.data ?? []) as CashFlow[]));
       setAll(((a.data ?? []) as any[]).map(normalizeTrade));
@@ -164,6 +185,8 @@ export default function Analytics() {
   const holding = useMemo(() => grouped(ts, "holding"), [ts]);
   const lots = useMemo(() => grouped(ts, "lots"), [ts]);
   const quality = useMemo(() => grouped(ts, "quality"), [ts]);
+  const sector = useMemo(() => grouped(ts, "sector"), [ts]);
+  const ipo = useMemo(() => grouped(ts, "ipo"), [ts]);
 
   const rdist = useMemo(
     () => [[-5, -3], [-3, -2], [-2, -1], [-1, -.5], [-.5, 0], [0, .5], [.5, 1], [1, 2], [2, 3], [3, 5], [5, Infinity]].map(([a, b]) => ({
@@ -214,13 +237,17 @@ export default function Analytics() {
           <StatCard label="Best Loss Streak" value={String(bestStreak(ts, false))} />
         </div>
 
+        {/* Paired by the question they answer — what you trade, when, how long, and how the trade
+            came to you — and an even count, so no row ends in half a row of empty space. */}
         <div className="grid two">
           {([
             ["Strategy P&L", strategy, "By the setup each trade was tagged with.", 10],
+            ["Sector P&L", sector, "Which Bursa sectors pay you — best first, sector by sector.", 8.5],
             ["Hourly P&L", hour, "Which Bursa hour pays you — the axis skips the 12:30–14:30 break.", 9.5, 0],
-            ["Holding Period P&L", holding, "Does letting a winner run, or cutting it fast, actually pay?", 9.5],
-            ["Position Size P&L", lots, "Board lots of 100 shares — the same size, every time?", 9.5],
             ["Weekday P&L", weekday, "Which days of the week you give money back.", 10],
+            ["Holding Period P&L", holding, "Does letting a winner run, or cutting it fast, actually pay?", 9.5],
+            ["Position Lot P&L", lots, "Position lot — 100 shares each. The same size, every time?", 9.5],
+            ["IPO P&L", ipo, "Whether the allocations you were given pay better than buying on the open market.", 9.5],
             ["Setup Quality P&L", quality, "The average of your 1–10 setup, execution and discipline scores.", 9.5],
           ] as const).map(([title, data, hint, tickFontSize, tickInterval]) => (
             <Card key={title}>
@@ -274,12 +301,26 @@ export default function Analytics() {
           </Card>
         </div>
 
+        {/* Full width, because a month per column needs the room the two-up grid cannot give it. */}
+        <SectorSentiment
+          trades={ts}
+          currency={currency}
+          onPickMonth={({ from, to, label, sector }) => {
+            setFilters(f => ({ ...f, from, to, sector }));
+            toast.info(`Filtered to ${sector ? `${sector} · ` : ""}${label.split(" · ").pop()}`);
+          }}
+        />
+
+        {/* The same pairing and the same order as the charts above, so a card and its table are
+            found in the same place on the page. */}
         <div className="grid two breakdown-grid">
           <Breakdown title="Strategy Breakdown" rows={strategy} currency={currency} />
+          <Breakdown title="Sector Breakdown" rows={sector} currency={currency} />
           <Breakdown title="Hourly Breakdown" rows={hour} currency={currency} sectionOf={hourSessionLabel} />
-          <Breakdown title="Holding Period Breakdown" rows={holding} currency={currency} />
-          <Breakdown title="Position Size Breakdown" rows={lots} currency={currency} />
           <Breakdown title="Weekday Breakdown" rows={weekday} currency={currency} />
+          <Breakdown title="Holding Period Breakdown" rows={holding} currency={currency} />
+          <Breakdown title="Position Lot Breakdown" rows={lots} currency={currency} />
+          <Breakdown title="IPO Breakdown" rows={ipo} currency={currency} />
           <Breakdown title="Setup Quality Breakdown" rows={quality} currency={currency} />
         </div>
       </>}

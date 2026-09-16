@@ -25,7 +25,13 @@ import {
   metricSeries,
   percentOf,
   qualityBucket,
+  monthBounds,
+  monthKey,
+  monthLabel,
+  sectorOf,
   sessionForTime,
+  SECTOR_UNSET,
+  shiftMonth,
   toLocalDatetimeInput,
   tradeYear,
   zakatForYear,
@@ -188,6 +194,29 @@ const nisab = zakatForYear(year, { basis: "net", nisab: 5000 });
 check("below the nisab nothing is due", nisab.due, 0);
 check("and the page is told why", nisab.belowNisab, true);
 check("a losing year floors at zero", zakatForYear([trade({ net_pnl: -500 })], { basis: "net" }).computed, 0);
+
+/* ------------------------------------------------------------- months and sectors */
+// The sector sentiment strip is a grid of months, so a month key that lands in the wrong month — or
+// a window that walks past a year boundary — draws a plausible but wrong picture.
+// 2026-08-31 16:30 UTC is 00:30 on 1 September in Malaysia: the trade belongs to September, which is
+// the same rule `dayKey` follows.
+check("a month is read in Malaysia, not UTC", monthKey("2026-08-31T16:30:00Z"), "2026-09");
+check("the last minute of a Malaysian month", monthKey("2026-08-31T15:59:00Z"), "2026-08");
+check("stepping back over a year boundary", shiftMonth("2026-01", -1), "2025-12");
+check("stepping forward over a year boundary", shiftMonth("2025-12", 1), "2026-01");
+check("stepping back a full year", shiftMonth("2026-09", -12), "2025-09");
+check("a month heading", monthLabel("2026-09"), "Sept 2026");
+// The month's own last day, which is what a click on a cell hands the date filter: February in a
+// leap year is 29, and the short months are not all 30.
+check("february in a leap year", monthBounds("2024-02").to, "2024-02-29");
+check("february in a common year", monthBounds("2025-02").to, "2025-02-28");
+check("a 30-day month", monthBounds("2026-09").to, "2026-09-30");
+check("a 31-day month", monthBounds("2026-12").to, "2026-12-31");
+check("the first of a month", monthBounds("2026-09").from, "2026-09-01");
+// A trade with no sector is "Not set", never blank: it is a line in the table, not a missing row.
+check("no sector reads as not set", sectorOf({ sector: null }), SECTOR_UNSET);
+check("a blank sector reads as not set", sectorOf({ sector: "   " }), SECTOR_UNSET);
+check("a sector is kept as written", sectorOf({ sector: "Technology" }), "Technology");
 
 /* ------------------------------------------------------------------ formatting */
 // An absence must never render as a zero: a blank field is not a break-even trade.
