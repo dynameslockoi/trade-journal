@@ -1,7 +1,9 @@
 "use client";
-import { useEffect } from "react";
+
 import Link from "next/link";
 import { X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   formatDurationMs,
   formatMoney,
@@ -15,6 +17,8 @@ import {
 /**
  * The pop-up behind a calendar day: what the day made, the balance it started from, the trade
  * stats behind it, and the trades themselves — each one a link into the journal.
+ *
+ * Escape-to-close, the scroll lock and the focus trap all come from Radix Dialog now.
  */
 export function CalendarDayModal({
   day,
@@ -27,15 +31,6 @@ export function CalendarDayModal({
   currency?: string | null;
   onClose: () => void;
 }) {
-  // Escape closes, and the page behind does not scroll while the pop-up is open.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = previous; };
-  }, [onClose]);
-
   // A day is keyed by local date, so noon keeps it on the right day whatever the timezone offset.
   const label = new Date(`${day.key}T12:00:00`).toLocaleDateString("en-MY", {
     weekday: "short", day: "2-digit", month: "short", year: "numeric",
@@ -46,16 +41,23 @@ export function CalendarDayModal({
   const trades = [...day.trades].sort((a, b) => b.entry_at.localeCompare(a.entry_at));
 
   return (
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
-      <div className="day-modal" role="dialog" aria-modal="true" aria-label={`Trades on ${label}`} onClick={e => e.stopPropagation()}>
+    <Dialog open onOpenChange={next => { if (!next) onClose(); }}>
+      <DialogContent
+        showClose={false}
+        aria-label={`Trades on ${label}`}
+        aria-describedby={undefined}
+        className="day-modal"
+      >
         <div className="day-modal-head">
           <div>
-            <div className="day-modal-date">{label}</div>
-            <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
+            <DialogTitle className="day-modal-date">{label}</DialogTitle>
+            <div className="muted" style={{ fontSize: 10.5, marginTop: 3 }}>
               {day.count} trade{day.count === 1 ? "" : "s"} · {day.wins}W / {day.losses}L
             </div>
           </div>
-          <button className="icon-btn" onClick={onClose} aria-label="Close day details"><X size={16} /></button>
+          <Button variant="secondary" size="icon" className="icon-btn" onClick={onClose} aria-label="Close day details">
+            <X size={16} />
+          </Button>
         </div>
 
         <div className="day-pnl-row">
@@ -114,10 +116,12 @@ export function CalendarDayModal({
         </div>
 
         <div className="day-modal-actions">
-          <Link className="btn btn-primary" href={`/journal?from=${day.key}&to=${day.key}`}>View in Journal</Link>
+          <Button asChild>
+            <Link href={`/journal?from=${day.key}&to=${day.key}`}>View in Journal</Link>
+          </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

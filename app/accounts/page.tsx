@@ -1,10 +1,17 @@
 "use client";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatMoney } from "@/lib/trading";
 import { BROKER_PRESETS, DEFAULT_BROKER_ID, brokerPreset } from "@/lib/fees";
 import { PageHeader } from "@/components/page-header";
-import { Select } from "@/components/select";
+import { ConfirmButton } from "@/components/confirm-button";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Account = { id: string; name: string; account_type: string; starting_balance: number; currency: string; max_daily_loss: number | null; max_drawdown: number | null; broker: string | null };
 type Trade = { account_id: string | null; net_pnl: number };
@@ -91,7 +98,6 @@ export default function Accounts() {
   }
 
   async function remove(id: string) {
-    if (!confirm("Delete this account? Existing trades will remain unassigned.")) return;
     const { error } = await createClient().from("trading_accounts").delete().eq("id", id);
     if (error) setError(error.message);
     else load();
@@ -102,38 +108,67 @@ export default function Accounts() {
       <PageHeader
         title="Accounts"
         subtitle="Track starting capital, live journal equity, broker fees and risk limits."
-        actions={<button className="btn btn-primary" onClick={() => { setError(""); setEditing(null); setForm(initial); setOpen(true); }}>+ Add Account</button>}
+        actions={
+          <Button onClick={() => { setError(""); setEditing(null); setForm(initial); setOpen(true); }}>+ Add Account</Button>
+        }
       />
-      {error && <div className="error">{error}</div>}
+      {error && <Alert variant="error">{error}</Alert>}
 
       {open && (
-        <div className="card card-pad" ref={formCard}>
-          <h3 style={{ marginTop: 0 }}>{editing ? "Edit Account" : "New Account"}</h3>
-          <form onSubmit={save} className="grid three">
-            <label className="field">Name<input className="input" required value={form.name} onChange={e => set("name", e.target.value)} /></label>
-            <div className="field">
-              <span>Broker</span>
-              <Select aria-label="Broker" value={form.broker} onChange={v => set("broker", v)}>
-                {BROKER_PRESETS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </Select>
-            </div>
-            <div className="field">
-              <span>Type</span>
-              <Select aria-label="Type" value={form.account_type} onChange={v => set("account_type", v)}>
-                <option>personal</option><option>funded</option><option>demo</option>
-              </Select>
-            </div>
-            <label className="field">Currency<input className="input" maxLength={6} value={form.currency} onChange={e => set("currency", e.target.value.toUpperCase())} /></label>
-            <label className="field">Starting Balance<input className="input" type="number" min="0" step="any" value={form.starting_balance} onChange={e => set("starting_balance", e.target.value)} /></label>
-            <label className="field">Daily Loss Limit<input className="input" type="number" min="0" step="any" value={form.max_daily_loss} onChange={e => set("max_daily_loss", e.target.value)} /></label>
-            <label className="field">Max Drawdown<input className="input" type="number" min="0" step="any" value={form.max_drawdown} onChange={e => set("max_drawdown", e.target.value)} /></label>
-            <div className="muted" style={{ gridColumn: "1/-1", fontSize: 11 }}>{brokerPreset(form.broker).note}</div>
-            <div style={{ gridColumn: "1/-1", display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button type="button" className="btn" onClick={close}>Cancel</button>
-              <button className="btn btn-primary">{editing ? "Save Changes" : "Save Account"}</button>
-            </div>
-          </form>
-        </div>
+        <Card ref={formCard}>
+          <CardHeader>
+            <CardTitle>{editing ? "Edit Account" : "New Account"}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={save} className="grid three">
+              <div className="form-field">
+                <Label htmlFor="acct-name">Name</Label>
+                <Input id="acct-name" required value={form.name} onChange={e => set("name", e.target.value)} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="acct-broker">Broker</Label>
+                <Select value={form.broker} onValueChange={v => set("broker", v)}>
+                  <SelectTrigger id="acct-broker"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {BROKER_PRESETS.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="form-field">
+                <Label htmlFor="acct-type">Type</Label>
+                <Select value={form.account_type} onValueChange={v => set("account_type", v)}>
+                  <SelectTrigger id="acct-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="personal">personal</SelectItem>
+                    <SelectItem value="funded">funded</SelectItem>
+                    <SelectItem value="demo">demo</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="form-field">
+                <Label htmlFor="acct-currency">Currency</Label>
+                <Input id="acct-currency" maxLength={6} value={form.currency} onChange={e => set("currency", e.target.value.toUpperCase())} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="acct-balance">Starting Balance</Label>
+                <Input id="acct-balance" type="number" min="0" step="any" value={form.starting_balance} onChange={e => set("starting_balance", e.target.value)} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="acct-daily">Daily Loss Limit</Label>
+                <Input id="acct-daily" type="number" min="0" step="any" value={form.max_daily_loss} onChange={e => set("max_daily_loss", e.target.value)} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="acct-drawdown">Max Drawdown</Label>
+                <Input id="acct-drawdown" type="number" min="0" step="any" value={form.max_drawdown} onChange={e => set("max_drawdown", e.target.value)} />
+              </div>
+              <div className="muted text-[10px] col-span-full">{brokerPreset(form.broker).note}</div>
+              <div className="col-span-full flex justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={close}>Cancel</Button>
+                <Button>{editing ? "Save Changes" : "Save Account"}</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid three">
@@ -141,28 +176,37 @@ export default function Accounts() {
           const pnl = pnlBy[a.id] || 0;
           const equity = Number(a.starting_balance) + pnl;
           return (
-            <div className="card card-pad" key={a.id}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                <div>
-                  <b>{a.name}</b>
-                  <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>{a.account_type} · {a.currency}</div>
-                  <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>{brokerPreset(a.broker).name}</div>
+            <Card key={a.id}>
+              <CardContent>
+                <div className="flex items-start justify-between gap-2.5">
+                  <div>
+                    <b>{a.name}</b>
+                    <div className="muted text-[10.5px] mt-1">{a.account_type} · {a.currency}</div>
+                    <div className="muted text-[10.5px] mt-[3px]">{brokerPreset(a.broker).name}</div>
+                  </div>
+                  {/* `flex-start` keeps the buttons their natural height beside a multi-line title. */}
+                  <div className="flex flex-none gap-2 self-start">
+                    <Button variant="secondary" size="sm" onClick={() => startEdit(a)}>Edit</Button>
+                    <ConfirmButton
+                      size="sm"
+                      title={`Delete ${a.name}?`}
+                      description="Existing trades will remain in the journal, unassigned."
+                      onConfirm={() => remove(a.id)}
+                    >
+                      Delete
+                    </ConfirmButton>
+                  </div>
                 </div>
-                {/* `flex-start` keeps the buttons their natural height beside a multi-line title. */}
-                <div style={{ display: "flex", gap: 8, flex: "none", alignSelf: "flex-start" }}>
-                  <button className="btn" onClick={() => startEdit(a)}>Edit</button>
-                  <button className="btn danger-btn" onClick={() => remove(a.id)}>Delete</button>
-                </div>
-              </div>
-              <div style={{ fontSize: 20, fontWeight: 800, marginTop: 20, fontVariantNumeric: "tabular-nums" }}>{formatMoney(equity, a.currency)}</div>
-              <div className={pnl >= 0 ? "positive" : "negative"} style={{ fontSize: 12.5, marginTop: 4 }}>Journal P&L {formatMoney(pnl, a.currency, true)}</div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>Starting balance {formatMoney(a.starting_balance, a.currency)}</div>
-              {a.max_daily_loss !== null && <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Daily loss limit {formatMoney(a.max_daily_loss, a.currency)}</div>}
-            </div>
+                <div className="mt-5 text-[18px] font-extrabold tabular-nums">{formatMoney(equity, a.currency)}</div>
+                <div className={`text-[11.5px] mt-1 ${pnl >= 0 ? "positive" : "negative"}`}>Journal P&L {formatMoney(pnl, a.currency, true)}</div>
+                <div className="muted text-[11px] mt-2">Starting balance {formatMoney(a.starting_balance, a.currency)}</div>
+                {a.max_daily_loss !== null && <div className="muted text-[10px] mt-1">Daily loss limit {formatMoney(a.max_daily_loss, a.currency)}</div>}
+              </CardContent>
+            </Card>
           );
         })}
       </div>
-      {!items.length && <div className="card card-pad empty">No accounts yet. Add your first trading account.</div>}
+      {!items.length && <Card><CardContent className="empty">No accounts yet. Add your first trading account.</CardContent></Card>}
     </div>
   );
 }

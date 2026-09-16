@@ -1,4 +1,5 @@
 "use client";
+
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -6,6 +7,10 @@ import { FilterBar, applyFilters, emptyFilters, type Filters } from "@/component
 import { EquityChart } from "@/components/equity-chart";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { calculateStats, formatMoney, formatR, metricSeries, normalizeTrade, shortDate, type Trade } from "@/lib/trading";
 
 type Account={id:string;name:string;starting_balance:number;currency:string};
@@ -32,7 +37,7 @@ export default function Dashboard(){
  return <div className="content">
   <PageHeader title="Dashboard" subtitle="A clean view of your trading performance and risk." />
   <FilterBar filters={filters} setFilters={setFilters} accounts={accounts} strategies={strategies} tags={tags}/>
-  {loading?<div className="card card-pad">Loading your journal…</div>:<>
+  {loading?<Card><CardContent>Loading your journal…</CardContent></Card>:<>
    <div className="grid four">
     <StatCard label="Net P&L" value={formatMoney(stats.pnl,currency,true)} positive={stats.pnl>=0} trend={series.equity}/>
     <StatCard label="Win Rate" value={`${stats.winRate.toFixed(1)}%`} sub={`${stats.wins}W / ${stats.losses}L / ${stats.breakeven} BE`} trend={series.winRate}/>
@@ -45,32 +50,44 @@ export default function Dashboard(){
     <StatCard label="Gross Loss" value={formatMoney(-stats.grossLoss,currency)} positive={false} trend={series.grossLoss}/>
     <StatCard label="Current Equity" value={equity===null?"—":formatMoney(equity,currency)} sub={selectedAccount?"Selected account":"Select one account"} trend={selectedAccount?series.equity:undefined}/>
    </div>
-   <div className="card card-pad">
-    <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center"}}>
-     <div><b>Equity Curve</b><div className="muted" style={{fontSize:11,marginTop:3}}>Cumulative P&L for the active filter set.</div></div>
-     <span className="badge">{trades.length} trades</span>
-    </div>
-    <div style={{height:300,marginTop:12}}><EquityChart data={stats.equity.map(x=>({d:x.date,v:x.pnl}))}/></div>
-   </div>
-   <div className="card">
-    <div className="card-pad" style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
-     <div><b>Recent Trades</b><div className="muted" style={{fontSize:11,marginTop:3}}>Latest trades matching your filters.</div></div>
-     <button className="btn" onClick={()=>router.push("/journal")}>View Journal</button>
-    </div>
-    <div className="table-wrap"><table>
-     <thead><tr><th>Date</th><th>Symbol</th><th>Strategy</th><th>P&L</th><th>R</th></tr></thead>
-     <tbody>
-      {recent.map(t=><tr key={t.id} onClick={()=>router.push(`/journal/${t.id}`)} style={{cursor:"pointer"}}>
-       <td>{shortDate(t.entry_at)}</td>
-       <td><b>{t.symbol}</b></td>
-       <td>{t.strategies?.name||"—"}</td>
-       <td className={Number(t.net_pnl)>=0?"positive":"negative"}>{formatMoney(t.net_pnl,currency,true)}</td>
-       <td>{formatR(t.r_multiple)}</td>
-      </tr>)}
-      {!recent.length&&<tr><td colSpan={5}><div className="empty">No trades match these filters.</div></td></tr>}
-     </tbody>
-    </table></div>
-   </div>
+   <Card>
+    <CardHeader className="flex flex-row items-center justify-between gap-3">
+     <div>
+      <CardTitle>Equity Curve</CardTitle>
+      <div className="muted text-[10px] mt-[3px]">Cumulative P&L for the active filter set.</div>
+     </div>
+     <Badge>{trades.length} trades</Badge>
+    </CardHeader>
+    <CardContent className="pt-3">
+     <div style={{height:300}}><EquityChart data={stats.equity.map(x=>({d:x.date,v:x.pnl}))}/></div>
+    </CardContent>
+   </Card>
+   <Card>
+    <CardHeader className="flex flex-row items-center justify-between gap-3">
+     <div>
+      <CardTitle>Recent Trades</CardTitle>
+      <div className="muted text-[10px] mt-[3px]">Latest trades matching your filters.</div>
+     </div>
+     <Button variant="secondary" onClick={()=>router.push("/journal")}>View Journal</Button>
+    </CardHeader>
+    <CardContent className="pt-0">
+     <Table>
+      <TableHeader>
+       <TableRow><TableHead>Date</TableHead><TableHead>Symbol</TableHead><TableHead>Strategy</TableHead><TableHead>P&L</TableHead><TableHead>R</TableHead></TableRow>
+      </TableHeader>
+      <TableBody>
+       {recent.map(t=><TableRow key={t.id} onClick={()=>router.push(`/journal/${t.id}`)} style={{cursor:"pointer"}}>
+        <TableCell>{shortDate(t.entry_at)}</TableCell>
+        <TableCell><b>{t.symbol}</b></TableCell>
+        <TableCell>{t.strategies?.name||"—"}</TableCell>
+        <TableCell className={Number(t.net_pnl)>=0?"positive":"negative"}>{formatMoney(t.net_pnl,currency,true)}</TableCell>
+        <TableCell>{formatR(t.r_multiple)}</TableCell>
+       </TableRow>)}
+       {!recent.length&&<TableRow><TableCell colSpan={5}><div className="empty">No trades match these filters.</div></TableCell></TableRow>}
+      </TableBody>
+     </Table>
+    </CardContent>
+   </Card>
   </>}
  </div>
 }

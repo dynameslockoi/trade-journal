@@ -1,4 +1,103 @@
 "use client";
-import {useEffect,useState}from"react";import { createClient } from "@/lib/supabase/client";
+
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { createClient } from "@/lib/supabase/client";
 import { PageHeader } from "@/components/page-header";
-export default function Reviews(){const today=new Date().toISOString().slice(0,10);const monday=(()=>{const d=new Date();const day=d.getDay();d.setDate(d.getDate()-(day===0?6:day-1));return d.toISOString().slice(0,10)})();const[d,setD]=useState(today),[w,setW]=useState(monday),[daily,setDaily]=useState<any>({plan_followed:false,execution_score:8,mood_score:8,what_went_well:"",mistakes:"",tomorrow_plan:""}),[weekly,setWeekly]=useState<any>({summary:"",lessons:"",action_plan:""}),[msg,setMsg]=useState("");useEffect(()=>{(async()=>{const s=createClient();const[a,b]=await Promise.all([s.from("daily_reviews").select("*").eq("review_date",d).maybeSingle(),s.from("weekly_reviews").select("*").eq("week_start",w).maybeSingle()]);if(a.data)setDaily(a.data);if(b.data)setWeekly(b.data)})()},[d,w]);const save=async(table:string,payload:any)=>{const s=createClient();const{data:{user}}=await s.auth.getUser();if(!user)return;const{error}=await s.from(table).upsert({user_id:user.id,...payload},{onConflict:table==="daily_reviews"?"user_id,review_date":"user_id,week_start"});setMsg(error?error.message:"Saved successfully.");setTimeout(()=>setMsg(""),2500)};return <div className="content"><PageHeader title="Reviews" subtitle="Turn your trading history into repeatable improvements."/>{msg&&<div className="success">{msg}</div>}<div className="grid two"><div className="card card-pad"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h3>Daily Review</h3><input className="input" type="date" value={d} onChange={e=>setD(e.target.value)} style={{width:160}}/></div><label className="field"><input type="checkbox" checked={!!daily.plan_followed} onChange={e=>setDaily({...daily,plan_followed:e.target.checked})}/> I followed my plan</label>{[["execution_score","Execution score"],["mood_score","Mood score"]].map(([k,l])=><label className="field" key={k}>{l}<input className="input" type="number" min="1" max="10" value={daily[k]} onChange={e=>setDaily({...daily,[k]:Number(e.target.value)})}/></label>)}{[["what_went_well","What went well?"],["mistakes","Biggest mistake?"],["tomorrow_plan","Tomorrow's plan"]].map(([k,l])=><label className="field" key={k}>{l}<textarea className="input" rows={4} value={daily[k]||""} onChange={e=>setDaily({...daily,[k]:e.target.value})}/></label>)}<button className="btn btn-primary" onClick={()=>save("daily_reviews",{...daily,review_date:d})}>Save Daily Review</button></div><div className="card card-pad"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h3>Weekly Review</h3><input className="input" type="date" value={w} onChange={e=>setW(e.target.value)} style={{width:160}}/></div>{[["summary","What happened this week?"],["lessons","Key lessons / recurring patterns"],["action_plan","Action plan for next week"]].map(([k,l])=><label className="field" key={k}>{l}<textarea className="input" rows={7} value={weekly[k]||""} onChange={e=>setWeekly({...weekly,[k]:e.target.value})}/></label>)}<button className="btn btn-primary" onClick={()=>save("weekly_reviews",{...weekly,week_start:w})}>Save Weekly Review</button></div></div></div>}
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/ui/date-picker";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+
+const DAILY_TEXT = [["what_went_well", "What went well?"], ["mistakes", "Biggest mistake?"], ["tomorrow_plan", "Tomorrow's plan"]] as const;
+const WEEKLY_TEXT = [["summary", "What happened this week?"], ["lessons", "Key lessons / recurring patterns"], ["action_plan", "Action plan for next week"]] as const;
+
+export default function Reviews() {
+  const today = new Date().toISOString().slice(0, 10);
+  const monday = (() => {
+    const d = new Date();
+    const day = d.getDay();
+    d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const [d, setD] = useState(today);
+  const [w, setW] = useState(monday);
+  const [daily, setDaily] = useState<any>({ plan_followed: false, execution_score: 8, mood_score: 8, what_went_well: "", mistakes: "", tomorrow_plan: "" });
+  const [weekly, setWeekly] = useState<any>({ summary: "", lessons: "", action_plan: "" });
+
+  useEffect(() => {
+    (async () => {
+      const s = createClient();
+      const [a, b] = await Promise.all([
+        s.from("daily_reviews").select("*").eq("review_date", d).maybeSingle(),
+        s.from("weekly_reviews").select("*").eq("week_start", w).maybeSingle(),
+      ]);
+      if (a.data) setDaily(a.data);
+      if (b.data) setWeekly(b.data);
+    })();
+  }, [d, w]);
+
+  const save = async (table: string, payload: any) => {
+    const s = createClient();
+    const { data: { user } } = await s.auth.getUser();
+    if (!user) return;
+    const { error } = await s.from(table).upsert({ user_id: user.id, ...payload }, { onConflict: table === "daily_reviews" ? "user_id,review_date" : "user_id,week_start" });
+    if (error) toast.error(error.message);
+    else toast.success("Saved successfully.");
+  };
+
+  return <div className="content">
+    <PageHeader title="Reviews" subtitle="Turn your trading history into repeatable improvements." />
+    <div className="grid two">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <CardTitle>Daily Review</CardTitle>
+          <div className="w-[190px]">
+            <DatePicker value={d} onChange={setD} placeholder="Review date" label="Review date" />
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <div className="review-label">
+            <Checkbox id="rv-plan" checked={!!daily.plan_followed} onCheckedChange={v => setDaily({ ...daily, plan_followed: !!v })} />
+            <Label htmlFor="rv-plan">I followed my plan</Label>
+          </div>
+          {([["execution_score", "Execution score"], ["mood_score", "Mood score"]] as const).map(([k, l]) => (
+            <div className="form-field" key={k}>
+              <Label htmlFor={`rv-${k}`}>{l}</Label>
+              <Input id={`rv-${k}`} type="number" min="1" max="10" value={daily[k]} onChange={e => setDaily({ ...daily, [k]: Number(e.target.value) })} />
+            </div>
+          ))}
+          {DAILY_TEXT.map(([k, l]) => (
+            <div className="form-field" key={k}>
+              <Label htmlFor={`rv-${k}`}>{l}</Label>
+              <Textarea id={`rv-${k}`} rows={4} value={daily[k] || ""} onChange={e => setDaily({ ...daily, [k]: e.target.value })} />
+            </div>
+          ))}
+          <Button type="button" onClick={() => save("daily_reviews", { ...daily, review_date: d })}>Save Daily Review</Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <CardTitle>Weekly Review</CardTitle>
+          <div className="w-[190px]">
+            <DatePicker value={w} onChange={setW} placeholder="Week start" label="Week start" />
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          {WEEKLY_TEXT.map(([k, l]) => (
+            <div className="form-field" key={k}>
+              <Label htmlFor={`rv-${k}`}>{l}</Label>
+              <Textarea id={`rv-${k}`} rows={7} value={weekly[k] || ""} onChange={e => setWeekly({ ...weekly, [k]: e.target.value })} />
+            </div>
+          ))}
+          <Button type="button" onClick={() => save("weekly_reviews", { ...weekly, week_start: w })}>Save Weekly Review</Button>
+        </CardContent>
+      </Card>
+    </div>
+  </div>;
+}

@@ -1,4 +1,6 @@
 import { Sparkline } from "@/components/sparkline";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 /**
  * Metric card for the dashboard, analytics and calendar. `trend` is optional: when given, a
@@ -20,11 +22,11 @@ export function StatCard({
   const tone = positive === true ? "positive" : positive === false ? "negative" : "";
   const trendTone = positive === true ? "positive" : positive === false ? "negative" : "accent";
   return (
-    <div className={`card stat-card ${tone}`}>
+    <Card className={cn("stat-card", tone)}>
       <div className="stat-label">{label}</div>
       <div className="stat-value">{value}</div>
       {sub && <div className="stat-sub">{sub}</div>}
       {trend && <Sparkline values={trend} tone={trendTone} />}
-    </div>
+    </Card>
   );
 }

@@ -1,18 +1,31 @@
 "use client";
+
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import type { ColumnDef } from "@tanstack/react-table";
+import { MoreHorizontal, SquarePen } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 import { FilterBar, emptyFilters, applyFilters, type Filters } from "@/components/filter-bar";
 import { PageHeader } from "@/components/page-header";
-import { formatMoney, formatR, normalizeTrade, shortDateTime } from "@/lib/trading";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { formatMoney, formatR, normalizeTrade, shortDateTime, type Trade } from "@/lib/trading";
 
 export default function Journal() {
-  const [r, setR] = useState<any[]>([]);
+  const [r, setR] = useState<Trade[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [strategies, setStrategies] = useState<any[]>([]);
   const [tags, setTags] = useState<any[]>([]);
   const [f, setF] = useState<Filters>(emptyFilters);
-  const [q, setQ] = useState("");
   const router = useRouter();
 
   useEffect(() => { (async () => {
@@ -26,7 +39,7 @@ export default function Journal() {
     ]);
     // `is_ipo` arrives with the Phase 9 migration; until then the journal still lists trades.
     const a = a0.error ? await s.from("trades").select(`id,${COLUMNS}`).order("entry_at", { ascending: false }) : a0;
-    setR((a.data ?? []).map(normalizeTrade));
+    setR((a.data ?? []).map(normalizeTrade) as Trade[]);
     setAccounts(b.data ?? []);
     setStrategies(c.data ?? []);
     setTags(d.data ?? []);
@@ -40,37 +53,104 @@ export default function Journal() {
     if (from || to) setF(prev => ({ ...prev, from, to }));
   }, []);
 
-  const rows = useMemo(
-    () => applyFilters(r, f).filter(t => !q || t.symbol.toLowerCase().includes(q.toLowerCase()) || t.strategies?.name?.toLowerCase().includes(q.toLowerCase())),
-    [r, f, q]
-  );
+  const rows = useMemo(() => applyFilters(r, f), [r, f]);
   const currency = accounts.find(a => a.id === f.account)?.currency;
+
+  const columns = useMemo<ColumnDef<Trade, any>[]>(() => [
+    {
+      id: "entry_at",
+      accessorFn: row => row.entry_at,
+      header: "Date",
+      cell: ({ row }) => shortDateTime(row.original.entry_at),
+    },
+    {
+      id: "symbol",
+      accessorFn: row => row.symbol,
+      header: "Symbol",
+      cell: ({ row }) => (
+        <>
+          <b>{row.original.symbol}</b>
+          {row.original.is_ipo && <Badge variant="ipo" className="ml-2">IPO</Badge>}
+        </>
+      ),
+    },
+    {
+      id: "strategy",
+      accessorFn: row => row.strategies?.name ?? "",
+      header: "Strategy",
+      cell: ({ row }) => row.original.strategies?.name || "—",
+    },
+    {
+      id: "session",
+      accessorFn: row => row.session ?? "",
+      header: "Session",
+      cell: ({ row }) => row.original.session || "—",
+    },
+    {
+      accessorKey: "net_pnl",
+      header: "P&L",
+      cell: ({ row }) => (
+        <span className={Number(row.original.net_pnl) >= 0 ? "positive" : "negative"}>
+          {formatMoney(row.original.net_pnl, currency, true)}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "r_multiple",
+      header: "R",
+      cell: ({ row }) => (row.original.r_multiple == null ? "—" : formatR(row.original.r_multiple)),
+    },
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      enableHiding: false,
+      cell: ({ row }) => (
+        // The menu must not also trigger the row's own click, which opens the trade.
+        <div onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label={`Actions for ${row.original.symbol}`}>
+                <MoreHorizontal size={16} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>{row.original.symbol}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => router.push(`/journal/${row.original.id}`)}>
+                Open trade
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => router.push(`/journal/${row.original.id}/edit`)}>
+                <SquarePen size={15} />
+                Edit trade
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ),
+    },
+  ], [currency, router]);
 
   return <div className="content">
     <PageHeader
       title="Trade Journal"
       subtitle={`${rows.length} matching trade${rows.length === 1 ? "" : "s"}`}
-      actions={<>
-        <input className="input search-input" placeholder="Search symbol or strategy…" value={q} onChange={e => setQ(e.target.value)} />
-        <button className="btn btn-primary" onClick={() => router.push("/journal/new")}>+ Add Trade</button>
-      </>}
+      actions={<Button onClick={() => router.push("/journal/new")}>+ Add Trade</Button>}
     />
     <FilterBar filters={f} setFilters={setF} accounts={accounts} strategies={strategies} tags={tags} />
     <div className="card">
-      <div className="table-wrap"><table>
-        <thead><tr><th>Date</th><th>Symbol</th><th>Strategy</th><th>Session</th><th>P&L</th><th>R</th></tr></thead>
-        <tbody>
-          {rows.map(t => <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => router.push(`/journal/${t.id}`)}>
-            <td>{shortDateTime(t.entry_at)}</td>
-            <td><b>{t.symbol}</b>{t.is_ipo && <span className="badge badge-ipo">IPO</span>}</td>
-            <td>{t.strategies?.name || "—"}</td>
-            <td>{t.session || "—"}</td>
-            <td className={Number(t.net_pnl) >= 0 ? "positive" : "negative"}>{formatMoney(t.net_pnl, currency, true)}</td>
-            <td>{t.r_multiple == null ? "—" : formatR(t.r_multiple)}</td>
-          </tr>)}
-          {!rows.length && <tr><td colSpan={6}><div className="empty">No trades match these filters.</div></td></tr>}
-        </tbody>
-      </table></div>
+      <div className="card-content">
+        <DataTable
+          columns={columns}
+          data={rows}
+          initialSorting={[{ id: "entry_at", desc: true }]}
+          searchText={row => `${row.symbol} ${row.strategies?.name ?? ""} ${row.session ?? ""}`}
+          searchPlaceholder="Search symbol, strategy or session…"
+          pageSize={15}
+          onRowClick={row => router.push(`/journal/${row.id}`)}
+          empty="No trades match these filters."
+        />
+      </div>
     </div>
   </div>;
 }

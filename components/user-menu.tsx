@@ -1,7 +1,9 @@
 "use client";
+
 import Link from "next/link";
 import { LogOut, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
 
 /**
  * The account controls in the topbar: the avatar opens Settings and the sign-out is an icon
@@ -12,14 +14,25 @@ export function UserMenu({ email, name }: { email: string; name?: string }) {
     await createClient().auth.signOut();
     window.location.href = "/login";
   }
+  const label = name?.trim() || email || "Account settings";
   return (
     <div className="user-menu">
-      <Link className="avatar" href="/settings" aria-label="Account settings" title={name?.trim() || email || "Account settings"}>
-        <UserRound size={16} />
-      </Link>
-      <button className="icon-btn" type="button" onClick={signout} aria-label="Sign out" title="Sign out">
+      <Button asChild variant="secondary" size="icon" className="avatar">
+        <Link href="/settings" aria-label="Account settings" title={label}>
+          <UserRound size={16} />
+        </Link>
+      </Button>
+      <Button
+        variant="secondary"
+        size="icon"
+        className="icon-btn"
+        type="button"
+        onClick={signout}
+        aria-label="Sign out"
+        title="Sign out"
+      >
         <LogOut size={16} />
-      </button>
+      </Button>
     </div>
   );
 }

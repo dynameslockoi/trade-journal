@@ -1,8 +1,55 @@
 @import "tailwindcss";
+/* shadcn/ui expresses its enter/exit states with utility animations (animate-in, fade-in-0,
+   zoom-in-95, slide-in-from-top-2 …). */
+@import "tw-animate-css";
 
-/* ============================================================ design tokens
-   Dark is the default; `<ThemeProvider data-theme="light">` swaps the palette.
-   Everything visual — colour, depth, radii, gradients — comes from here. */
+/* ======================================================= shadcn/ui semantic bridge
+   shadcn components are written against semantic utilities — `bg-card`, `text-muted-foreground`,
+   `border-border`, `bg-primary`, `rounded-md`. `@theme inline` substitutes the *expression* into
+   each utility rather than the resolved colour, so those utilities keep following `[data-theme]`.
+
+   Mapping them onto this app's own tokens is what lets a Radix primitive drop into a page without
+   importing a second palette: there is still exactly one place colours are defined, below. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--panel);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--panel-2);
+  --color-popover-foreground: var(--text);
+  /* The brand violet. `accent` deliberately means something else here (the hover surface, as in
+     shadcn) so both vocabularies resolve to the right colour. */
+  --color-primary: var(--accent);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--surface-2);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--surface-3);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--negative);
+  --color-destructive-foreground: #ffffff;
+  --color-success: var(--positive);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: calc(var(--r-lg) + 6px);
+}
+
+/* ============================================================= the application
+   Everything below lives in the `components` layer — the same slot shadcn fills — so a utility
+   written next to one of these classes (`<Input className="pl-9">`) still wins. Unlayered CSS
+   outranks every layer, which would have made those utilities silently do nothing.
+
+   Dark is the default; `<ThemeProvider data-theme="light">` swaps the palette. */
+@layer components {
+
+/* ============================================================ design tokens */
 :root {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
@@ -129,6 +176,10 @@ html, body { margin: 0; min-height: 100%; }
 html { background: var(--bg); }
 body {
   font-family: var(--font-sans);
+  /* Without a size here, anything that does not set its own inherits the browser's 16px — form
+     controls and paragraphs came out noticeably heavier than the 10–13.5px scale the rest of the
+     app is set in. This is the baseline every unset element now falls back to. */
+  font-size: 12.5px;
   color: var(--text);
   background-color: var(--bg);
   background-image: radial-gradient(58rem 34rem at 8% -12%, var(--aurora-1), transparent 62%),
@@ -164,31 +215,39 @@ code { background: var(--chip-bg); color: var(--text-dim); padding: 2px 6px; bor
   overflow-y: auto;
 }
 .main { margin-left: 250px; width: calc(100% - 250px); min-width: 0; }
+/* Phone navigation — a bottom bar for the daily destinations plus a More button that opens the
+   full list in a sheet. Hidden on wider screens, where the rail already shows every section. */
+.mobile-nav { display: none; }
+.brand-flat { margin-bottom: 0; padding: 0; }
+.nav-sheet { display: grid; gap: 2px; }
 .content { padding: 22px 24px 36px; max-width: 1600px; margin: 0 auto; }
 /* Every direct child of a page body is spaced by one value instead of ad-hoc margins. */
 .content > * + * { margin-top: var(--section-gap); }
 
-.brand { display: flex; align-items: center; gap: 11px; padding: 2px 6px 0; margin-bottom: 22px; font-weight: 800; font-size: 15.5px; letter-spacing: -0.02em; }
+.brand { display: flex; align-items: center; gap: 11px; padding: 2px 6px 0; margin-bottom: 22px; font-weight: 800; font-size: 14px; letter-spacing: -0.02em; }
 .brand-logo {
   width: 32px; height: 32px; border-radius: 10px; flex: none;
   background-image: var(--grad-accent);
   box-shadow: 0 8px 20px -8px var(--accent-glow), inset 0 1px 0 var(--sheen);
-  display: grid; place-items: center; color: #fff; font-weight: 900; font-size: 16px;
+  display: grid; place-items: center; color: #fff; font-weight: 900; font-size: 14.5px;
 }
-.section-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.11em; font-weight: 700; color: var(--text-faint); padding: 0 12px 9px; }
+.section-label { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.11em; font-weight: 700; color: var(--text-faint); padding: 0 12px 9px; }
 
 /* ============================================================== page headers */
 .page-head-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .page-head-text { min-width: 0; }
-.page-head h1 { margin: 0; font-size: 22px; }
-.page-head-sub { margin-top: 3px; font-size: 13px; }
+.page-head h1 { margin: 0; font-size: 20px; line-height: 1.18; letter-spacing: -0.025em; }
+/* The last word of a two-word title takes the brand colour, so the title reads as one phrase. */
+.page-head-accent { color: var(--accent); }
+/* Subtitle sits a clear step below the title rather than reading as a second title. */
+.page-head-sub { margin-top: 5px; font-size: 11.5px; line-height: 1.5; max-width: 74ch; }
 .page-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.eyebrow { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); margin-bottom: 3px; }
+.eyebrow { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); margin-bottom: 3px; }
 
 .nav-item {
   position: relative; display: flex; align-items: center; gap: 11px;
   padding: 9px 12px; border-radius: var(--r-sm); margin: 2px 0;
-  color: var(--text-dim); font-size: 13.5px;
+  color: var(--text-dim); font-size: 12.5px;
   transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 .nav-item svg { opacity: 0.85; transition: opacity 0.16s ease; }
@@ -207,7 +266,7 @@ code { background: var(--chip-bg); color: var(--text-dim); padding: 2px 6px; bor
   backdrop-filter: blur(14px) saturate(150%);
   -webkit-backdrop-filter: blur(14px) saturate(150%);
 }
-.topbar-title { display: flex; align-items: center; gap: 9px; font-size: 13px; }
+.topbar-title { display: flex; align-items: center; gap: 9px; font-size: 12px; }
 .topbar-title .crumb-sep { color: var(--border-strong); }
 .crumb-sep { color: var(--border-strong); }
 /* `margin-left: auto` keeps the controls on the right even when the crumbs are hidden on a phone
@@ -239,7 +298,7 @@ code { background: var(--chip-bg); color: var(--text-dim); padding: 2px 6px; bor
   pointer-events: none;
 }
 .card-pad { padding: 20px; }
-.card h3 { margin: 0 0 16px; font-size: 15px; }
+.card h3 { margin: 0 0 16px; font-size: 13.5px; }
 .grid { display: grid; gap: var(--section-gap); }
 /* Grid items default to min-width:auto, which lets a wide table stretch the whole page. */
 .grid > * { min-width: 0; }
@@ -264,11 +323,11 @@ code { background: var(--chip-bg); color: var(--text-dim); padding: 2px 6px; bor
 }
 .stat-label {
   position: relative; display: flex; align-items: center; gap: 8px;
-  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted);
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted);
 }
 .stat-label::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.stat-value { position: relative; font-size: 25px; font-weight: 800; letter-spacing: -0.03em; margin-top: 9px; font-variant-numeric: tabular-nums; }
-.stat-sub { position: relative; font-size: 11.5px; color: var(--muted); margin-top: 5px; }
+.stat-value { position: relative; font-size: 20px; font-weight: 800; letter-spacing: -0.03em; margin-top: 9px; font-variant-numeric: tabular-nums; }
+.stat-sub { position: relative; font-size: 10.5px; color: var(--muted); margin-top: 5px; }
 .stat-spark { position: relative; margin-top: 12px; opacity: 0.92; }
 .stat-card.positive .stat-label::before { background: var(--positive); box-shadow: 0 0 0 3px color-mix(in srgb, var(--positive) 18%, transparent); }
 .stat-card.positive .stat-value { color: var(--positive); }
@@ -283,7 +342,7 @@ code { background: var(--chip-bg); color: var(--text-dim); padding: 2px 6px; bor
   color: var(--text);
   border-radius: var(--r-sm);
   padding: 8px 13px;
-  font-size: 13px; font-weight: 600;
+  font-size: 12px; font-weight: 600;
   cursor: pointer;
   transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
 }
@@ -302,6 +361,8 @@ code { background: var(--chip-bg); color: var(--text-dim); padding: 2px 6px; bor
 .input {
   width: 100%; background: var(--field); border: 1px solid var(--border); color: var(--text);
   border-radius: var(--r-md); padding: 10px 12px; outline: none;
+  /* Stated rather than inherited, so a control reads the same whatever wrapper it sits in. */
+  font-size: 12.5px;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 .input:hover { border-color: var(--border-strong); }
@@ -309,11 +370,9 @@ code { background: var(--chip-bg); color: var(--text-dim); padding: 2px 6px; bor
 .input::placeholder { color: var(--placeholder); }
 select.input { cursor: pointer; }
 
-/* Themed dropdown — components/select.tsx. The browser draws a native <select> pop-up itself,
+/* Themed dropdown — components/ui/select.tsx. The browser draws a native <select> pop-up itself,
    so it comes out as a white list with a system-blue highlight band that belongs to neither
-   theme. This draws the list from the page instead, on the same tokens as everything else. */
-.select { position: relative; }
-.field .select { margin-top: 7px; font-weight: 400; }
+   theme. Radix renders the list from the page instead, on the same tokens as everything else. */
 .select-btn {
   width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
   background: var(--field); border: 1px solid var(--border); color: var(--text);
@@ -321,41 +380,88 @@ select.input { cursor: pointer; }
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 .select-btn:hover:not(:disabled) { border-color: var(--border-strong); }
-.select.is-open .select-btn,
+.select-btn[data-state="open"],
 .select-btn:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
 .select-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-value[data-placeholder] { color: var(--placeholder); }
 .select-caret { flex: none; color: var(--muted); transition: transform 0.18s ease, color 0.18s ease; }
-.select.is-open .select-caret { transform: rotate(180deg); color: var(--accent); }
+.select-btn[data-state="open"] .select-caret { transform: rotate(180deg); color: var(--accent); }
+.field .select-btn { margin-top: 7px; font-weight: 400; }
+/* Radix measures the trigger and publishes its width, so the list lines up with it. The viewport
+   is the scroller, which is what lets the scroll-arrow buttons appear on a long list. */
+.select-content {
+  min-width: var(--radix-select-trigger-width, auto); max-width: min(92vw, 360px);
+  padding: 5px 0; overflow: hidden; max-height: var(--radix-select-content-available-height, 292px);
+}
 
-.select-menu {
-  position: absolute; z-index: 70; left: 0; top: calc(100% + 6px);
-  min-width: 100%; width: max-content; max-width: min(92vw, 340px);
-  max-height: 292px; overflow: auto; padding: 5px; margin: 0;
-  background: var(--panel-2); border: 1px solid var(--border-strong); border-radius: var(--r-md);
-  box-shadow: var(--shadow-2);
-  animation: select-drop 0.14s ease-out;
+/* --- date picker — components/ui/date-picker.tsx ----------------------------- */
+/* The browser's own date pop-up cannot be styled at all: it ignores custom properties, so it lands
+   as a light sheet in dark mode. These fields are a Radix popover instead, on the app's tokens. */
+.picker-value { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.picker-icon { flex: none; color: var(--muted); }
+.picker-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-empty { color: var(--placeholder); }
+/* Doubled class: `.popover-surface` states the default width further down the file, and both
+   selectors weigh the same, so this must outrank it rather than rely on order. */
+.popover-surface.picker-panel { width: min(92vw, 302px); padding: 12px; }
+.picker-foot {
+  display: flex; align-items: center; gap: 4px; margin-top: 10px;
+  padding-top: 8px; border-top: 1px solid var(--border-soft);
 }
-.select.drop-up .select-menu { top: auto; bottom: calc(100% + 6px); animation-name: select-lift; }
-@keyframes select-drop { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
-@keyframes select-lift { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) {
-  .select-menu { animation: none; }
+.picker-action {
+  padding: 6px 7px; border: 0; border-radius: 7px; background: transparent;
+  color: var(--accent); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
 }
-.select-opt {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 8px 10px; border-radius: 9px; cursor: pointer; font-size: 13px; color: var(--text-dim);
-  transition: background 0.12s ease, color 0.12s ease;
+.picker-action:hover { background: var(--accent-soft); }
+.picker-done { margin-left: auto; }
+.picker-time { margin-top: 10px; }
+.picker-time-row { display: flex; align-items: center; gap: 5px; }
+.picker-time-sep { color: var(--muted); font-weight: 700; }
+.picker-time-btn { padding: 7px 9px; }
+/* The month grid: react-day-picker renders the markup, the app owns every pixel of it. Its own
+   stylesheet is deliberately not loaded — it is unlayered, so it would outrank this file. */
+.app-calendar { font-size: 11.5px; color: var(--text); user-select: none; }
+/* The nav is a child of the months wrapper, so that is what the buttons anchor against. */
+.pick-months { position: relative; }
+.pick-month { position: relative; }
+.pick-caption { display: flex; align-items: center; min-height: 30px; padding-right: 62px; }
+.pick-caption-label { font-size: 12.5px; font-weight: 700; letter-spacing: -0.01em; }
+/* The nav sits in the caption's row, its buttons at the far right. */
+.pick-nav { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 4px; }
+.pick-nav-btn {
+  display: grid; place-items: center; width: 27px; height: 27px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
+  color: var(--text-dim); cursor: pointer;
 }
-.select-opt-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.select-opt.is-active { background: var(--surface-3); color: var(--text); }
-.select-opt.is-selected { color: var(--text); font-weight: 600; }
-.select-opt.is-selected.is-active { background: var(--accent-soft); }
-.select-opt.is-disabled { opacity: 0.45; cursor: not-allowed; }
-.select-tick { flex: none; color: var(--accent); }
+.pick-nav-btn:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+.pick-nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pick-grid { border-collapse: collapse; }
+.pick-weekday {
+  padding: 2px 0 6px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-faint);
+}
+.pick-day { padding: 0; }
+.pick-day-btn {
+  width: 33px; height: 31px; display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: 9px; background: transparent;
+  color: var(--text-dim); font: inherit; font-size: 11.5px; font-variant-numeric: tabular-nums;
+  cursor: pointer; transition: background 0.14s ease, color 0.14s ease;
+}
+.pick-day-btn:hover { background: var(--surface-3); color: var(--text); }
+.pick-day-outside .pick-day-btn { opacity: 0.38; }
+.pick-day-today:not(.pick-day-selected) .pick-day-btn { color: var(--accent); font-weight: 800; }
+.pick-day-selected .pick-day-btn { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.pick-day-disabled .pick-day-btn { opacity: 0.4; cursor: not-allowed; }
+.pick-hidden { visibility: hidden; }
+.select-viewport { padding: 0 5px; max-height: 272px; overflow-y: auto; }
+.select-scroll { display: grid; place-items: center; padding: 3px; color: var(--muted); }
+.select-item { padding-right: 10px; }
+.select-item[data-state="checked"] { color: var(--text); font-weight: 600; }
+.select-item[data-state="checked"][data-highlighted] { background: var(--accent-soft); }
 input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
 
-.field { display: block; font-size: 11.5px; font-weight: 600; color: var(--text-dim); line-height: 1.35; }
+.field { display: block; font-size: 10.5px; font-weight: 600; color: var(--text-dim); line-height: 1.35; }
 .field .input { margin-top: 7px; font-weight: 400; }
 .review-label { display: flex; align-items: center; gap: 8px; }
 .score-input { max-width: 110px; }
@@ -363,7 +469,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .badge {
   display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 999px;
   border: 1px solid var(--border); background: var(--chip-bg); color: var(--chip-text);
-  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.02em;
 }
 /* Sits beside a symbol in the journal, so an IPO allocation is visible at a glance. */
 .badge-ipo {
@@ -372,36 +478,36 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 }
 .tag-chip {
   display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; white-space: nowrap;
-  border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: 13px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: 12px;
 }
 .tag-chip small { color: var(--muted); }
-.tag-chip button { border: 0; background: transparent; color: var(--chip-icon); cursor: pointer; font-size: 15px; line-height: 1; }
+.tag-chip button { border: 0; background: transparent; color: var(--chip-icon); cursor: pointer; font-size: 13.5px; line-height: 1; }
 
 /* A card's own header: title and hint on the left, a summary pill on the right. */
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.card-hint { font-size: 12px; margin-top: 2px; }
+.card-hint { font-size: 11px; margin-top: 2px; }
 /* Two controls per row with a hint line under each, so nothing is clipped in a narrow column. */
 .field-grid { margin-top: 14px; row-gap: 14px; }
 .field-wide { grid-column: 1 / -1; }
-.field-hint { display: block; margin-top: 5px; font-size: 10.5px; font-weight: 400; color: var(--text-faint); line-height: 1.45; }
+.field-hint { display: block; margin-top: 5px; font-size: 9.5px; font-weight: 400; color: var(--text-faint); line-height: 1.45; }
 /* What the settings add up to, so the card states its own result instead of hiding it in a card. */
 .settings-total {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   margin-top: 16px; padding: 12px 13px; border: 1px solid var(--border); border-radius: var(--r-md);
-  background: var(--surface-2); font-size: 13px; font-variant-numeric: tabular-nums;
+  background: var(--surface-2); font-size: 12px; font-variant-numeric: tabular-nums;
 }
-.settings-total b { font-size: 16px; letter-spacing: -0.01em; }
+.settings-total b { font-size: 14.5px; letter-spacing: -0.01em; }
 .settings-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 
 /* ==================================================================== tables */
 .table-wrap { overflow: auto; border-radius: var(--r-lg); }
 table { width: 100%; border-collapse: collapse; }
 th {
-  color: var(--text-faint); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-faint); font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
   text-align: left; padding: 11px 13px; border-bottom: 1px solid var(--border); white-space: nowrap;
 }
 /* Figures, dates and badges stay on one line; a table wider than its card scrolls inside it. */
-td { padding: 12px 13px; border-bottom: 1px solid var(--border-soft); font-size: 13.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td { padding: 12px 13px; border-bottom: 1px solid var(--border-soft); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr { transition: background 0.15s ease; }
 tbody tr:hover { background: var(--row-hover); }
@@ -412,7 +518,7 @@ tbody tr.row-idle:hover { background: transparent; }
 /* An hourly table bands its rows by session: a label above the hours, a subtotal below them. */
 tbody tr.section-head td {
   padding: 15px 7px 4px; border-bottom: 0; color: var(--text-faint);
-  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
 }
 tbody tr.section-total td { background: var(--row-hover); font-weight: 700; }
 tbody tr.section-total td:first-child { border-radius: var(--r-sm) 0 0 var(--r-sm); }
@@ -420,25 +526,25 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
 
 /* Breakdown tables sit two to a row beside their charts, so they are set tighter than the
    journal's full-width table and their five columns still fit inside the card. */
-.table-compact th { padding: 9px 7px; font-size: 10px; }
-.table-compact td { padding: 9px 7px; font-size: 12.5px; }
+.table-compact th { padding: 9px 7px; font-size: 9.5px; }
+.table-compact td { padding: 9px 7px; font-size: 11px; }
 .table-compact th:first-child, .table-compact td:first-child { padding-left: 2px; }
 .table-compact th:last-child, .table-compact td:last-child { padding-right: 2px; }
 
 /* ================================================================== feedback */
 .error {
   padding: 11px 13px; border: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--danger-text);
-  border-radius: var(--r-md); font-size: 13px;
+  border-radius: var(--r-md); font-size: 12px;
 }
 .success {
   padding: 11px 13px; border: 1px solid var(--success-border); background: var(--success-bg); color: var(--success-text);
-  border-radius: var(--r-md); font-size: 13px;
+  border-radius: var(--r-md); font-size: 12px;
 }
 .center { text-align: center; }
 .link { color: var(--link); font-weight: 600; }
 .empty {
   min-height: 130px; display: grid; place-items: center; text-align: center; padding: 40px 24px;
-  color: var(--muted); font-size: 13.5px;
+  color: var(--muted); font-size: 12.5px;
 }
 .upload-box {
   margin-top: 12px; border: 1px dashed var(--border-strong); border-radius: var(--r-md);
@@ -452,10 +558,11 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
   background: radial-gradient(circle at 50% 0, var(--glow) 0, var(--bg) 48%);
 }
 .auth-card { width: min(440px, 100%); padding: 32px; box-shadow: var(--shadow-2); }
-.auth-card h1 { margin: 16px 0 6px; font-size: 23px; }
+.auth-card h1 { margin: 16px 0 0; font-size: 21px; line-height: 1.18; letter-spacing: -0.025em; }
+.auth-sub { margin: 8px 0 0; font-size: 11.5px; line-height: 1.55; max-width: 44ch; }
 .auth-logo {
   width: 46px; height: 46px; border-radius: 14px; background-image: var(--grad-accent);
-  display: grid; place-items: center; font-weight: 900; font-size: 21px; color: #fff;
+  display: grid; place-items: center; font-weight: 900; font-size: 19px; color: #fff;
   box-shadow: 0 12px 28px -12px var(--accent-glow), inset 0 1px 0 var(--sheen);
 }
 
@@ -467,7 +574,7 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
   position: fixed; right: 26px; bottom: 26px; z-index: 40;
   display: inline-flex; align-items: center; gap: 9px; padding: 12px 16px;
   border-radius: 999px; text-decoration: none; color: #fff;
-  font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em;
+  font-size: 12.5px; font-weight: 700; letter-spacing: -0.01em;
   background-image: var(--grad-accent);
   box-shadow: 0 16px 34px -14px var(--accent-glow), inset 0 1px 0 var(--sheen);
   transition: transform 0.16s ease, filter 0.16s ease, box-shadow 0.16s ease;
@@ -476,7 +583,7 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
 .fab:active { transform: translateY(0); }
 .fab-label { white-space: nowrap; }
 .fab-key {
-  font: inherit; font-size: 10.5px; font-weight: 800; letter-spacing: 0.05em;
+  font: inherit; font-size: 9.5px; font-weight: 800; letter-spacing: 0.05em;
   padding: 2px 6px; border-radius: 6px;
   background: rgba(255, 255, 255, 0.2); border: 1px solid rgba(255, 255, 255, 0.3);
 }
@@ -485,18 +592,18 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
 .settings-card h3 { margin: 0 0 14px; }
 .settings-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-  margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--border-soft); font-size: 11.5px;
+  margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--border-soft); font-size: 10.5px;
 }
 .settings-card .input:disabled { opacity: 0.7; cursor: not-allowed; }
 
 /* ============================================================ detail & strips */
 .detail-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
-.metric-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); }
-.metric-value { margin-top: 8px; font-size: 19px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.metric-label { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); }
+.metric-value { margin-top: 8px; font-size: 15.5px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .calc-strip {
   margin-top: 14px; padding: 13px 15px;
   background: var(--tile); border: 1px solid var(--border); border-radius: var(--r-md);
-  display: flex; gap: 24px; flex-wrap: wrap; font-size: 12.5px; font-variant-numeric: tabular-nums;
+  display: flex; gap: 24px; flex-wrap: wrap; font-size: 11.5px; font-variant-numeric: tabular-nums;
 }
 .calc-strip b { font-weight: 800; letter-spacing: -0.01em; }
 .fee-panel {
@@ -504,8 +611,8 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
   background: var(--tile); border: 1px solid var(--border); border-radius: var(--r-md);
   display: grid; gap: 8px; font-variant-numeric: tabular-nums;
 }
-.fee-row { display: flex; justify-content: space-between; gap: 14px; font-size: 12.5px; flex-wrap: wrap; }
-.fee-row.fee-total { border-top: 1px dashed var(--border); padding-top: 9px; font-weight: 800; font-size: 13.5px; }
+.fee-row { display: flex; justify-content: space-between; gap: 14px; font-size: 11.5px; flex-wrap: wrap; }
+.fee-row.fee-total { border-top: 1px dashed var(--border); padding-top: 9px; font-weight: 800; font-size: 12.5px; }
 .fee-breakdown { display: grid; gap: 6px; }
 .shot-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .screenshot-wrap { position: relative; }
@@ -515,7 +622,7 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
 .cal-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .cal-nav-group { display: flex; align-items: center; gap: 4px; }
 .cal-pickers { display: flex; align-items: center; gap: 8px; flex: 1 1 240px; }
-.cal-pickers .input, .cal-pickers .select { width: auto; flex: 1 1 120px; max-width: 190px; }
+.cal-pickers .input, .cal-pickers .select-btn { width: auto; flex: 1 1 120px; max-width: 190px; }
 .cal-pickers .input, .cal-pickers .select-btn { padding: 8px 10px; font-weight: 600; }
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0;
@@ -532,14 +639,14 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
   transition: border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
 }
 .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 7px; }
-.calendar-weekday { font-size: 11px; padding: 4px 6px; }
+.calendar-weekday { font-size: 10px; padding: 4px 6px; }
 .cal-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.calendar-day { font-size: 11px; color: var(--muted); }
+.calendar-day { font-size: 10px; color: var(--muted); }
 /* The symbol may drop to its own line in a narrow cell, but the figure itself never breaks. */
-.calendar-pnl { margin-top: auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; font-weight: 800; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.calendar-pnl { margin-top: auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; font-weight: 800; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .cal-amt { white-space: nowrap; }
-.cal-meta { margin-top: 2px; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.cal-today-tag { font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; color: var(--accent); }
+.cal-meta { margin-top: 2px; font-size: 9.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cal-today-tag { font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; color: var(--accent); }
 .calendar-today { box-shadow: 0 0 0 1px var(--accent) inset; }
 .calendar-cell:hover { border-color: var(--cal-hover); transform: translateY(-1px); }
 .cal-click { cursor: pointer; }
@@ -548,7 +655,7 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
 .calendar-negative { background: var(--cal-negative); border-color: color-mix(in srgb, var(--negative) 24%, var(--cal-border)); }
 .calendar-zero { background: var(--cal-cell); }
 .calendar-cell:not(.cal-click) { opacity: 0.66; }
-.cal-legend { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 11.5px; margin-top: 14px; }
+.cal-legend { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 10.5px; margin-top: 14px; }
 
 /* ================================ calendar year strip (months across, years down) */
 .year-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -559,12 +666,12 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
 .year-row { display: grid; grid-template-columns: 70px repeat(13, minmax(104px, 1fr)); gap: 6px; }
 .year-month {
   display: flex; align-items: center; justify-content: center; padding: 4px 0; text-align: center;
-  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint);
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint);
 }
 /* Sticky so the year stays readable while the strip scrolls sideways. */
 .year-label {
   position: sticky; left: 0; z-index: 2; display: flex; align-items: center;
-  background: var(--panel); font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums;
+  background: var(--panel); font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums;
 }
 .year-cell {
   display: flex; flex-direction: column; gap: 2px; padding: 9px 10px;
@@ -577,12 +684,12 @@ button.year-cell:disabled { cursor: default; }
 /* Two classes, so the tone wins over the base cell background whatever the rule order. */
 .year-cell.calendar-positive { background: var(--cal-positive); }
 .year-cell.calendar-negative { background: var(--cal-negative); }
-.year-pnl { font-size: 12.5px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.year-pnl { font-size: 11.5px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* The figure takes the tone colour too, like the day cells above. */
 .year-cell.calendar-positive .year-pnl { color: var(--positive); }
 .year-cell.calendar-negative .year-pnl { color: var(--negative); }
-.year-count { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.year-empty { font-size: 12px; color: var(--muted); }
+.year-count { font-size: 9.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.year-empty { font-size: 11px; color: var(--muted); }
 .year-off { opacity: 0.5; }
 .year-current { box-shadow: inset 0 0 0 1px var(--accent); }
 .year-total { border-color: var(--border-strong); }
@@ -600,46 +707,249 @@ button.year-cell:disabled { cursor: default; }
   box-shadow: var(--shadow-2); animation: rise 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .day-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.day-modal-date { font-size: 15px; font-weight: 800; letter-spacing: -0.02em; }
+.day-modal-date { font-size: 13.5px; font-weight: 800; letter-spacing: -0.02em; }
 .day-pnl-row {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
   margin-top: 16px; padding: 13px 15px;
   background: var(--tile); border: 1px solid var(--border); border-radius: var(--r-md);
 }
-.day-pnl { margin-top: 6px; font-size: 25px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.day-pnl { margin-top: 6px; font-size: 20px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .day-section {
-  margin-top: 18px; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  margin-top: 18px; font-size: 9.5px; font-weight: 700; text-transform: uppercase;
   letter-spacing: 0.09em; color: var(--text-faint);
 }
 .day-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
 .day-tiles.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .day-tile { padding: 11px 12px; background: var(--tile); border: 1px solid var(--border); border-radius: var(--r-md); }
-.day-tile .metric-value { font-size: 15px; }
-.day-tile-count { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; }
-.day-tile-count b { font-size: 17px; font-variant-numeric: tabular-nums; }
-.day-note { margin-top: 10px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.day-tile .metric-value { font-size: 13.5px; }
+.day-tile-count { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
+.day-tile-count b { font-size: 15.5px; font-variant-numeric: tabular-nums; }
+.day-note { margin-top: 10px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
 .day-rows { margin-top: 10px; display: grid; gap: 8px; }
-.day-row { display: flex; justify-content: space-between; gap: 14px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.day-row { display: flex; justify-content: space-between; gap: 14px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .day-row b { font-weight: 700; letter-spacing: -0.01em; }
 .day-trades { margin-top: 10px; display: grid; gap: 6px; }
 .day-trade {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px;
   background: var(--tile); border: 1px solid var(--border); border-radius: var(--r-md);
-  color: inherit; text-decoration: none; font-size: 13px; transition: border-color 0.16s ease, background 0.16s ease;
+  color: inherit; text-decoration: none; font-size: 12px; transition: border-color 0.16s ease, background 0.16s ease;
 }
 .day-trade:hover { border-color: var(--border-strong); background: var(--surface-2); }
-.day-trade-time { font-size: 11.5px; }
+.day-trade-time { font-size: 10.5px; }
 .day-modal-actions { display: flex; gap: 8px; margin-top: 18px; }
 .day-modal-actions .btn { flex: 1 1 auto; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 .filter-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.filter-hint { font-size: 11px; margin-top: 3px; }
+.filter-hint { font-size: 10px; margin-top: 3px; }
 .filter-actions { display: flex; align-items: center; gap: 8px; }
 .search-input { width: 230px; }
 .filter-card .grid { margin-top: 14px; }
 /* Two classes so it keeps winning over the plain `.grid.four` base rule below the 1350px step. */
 .grid.four.filter-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* ============================================================ shadcn/ui surfaces
+   Radix primitives render through a portal, so they cannot inherit a page's classes. These are the
+   one place their looks live, expressed on the same tokens as everything above. */
+
+/* --- button variants that the base `.btn` does not already cover ------------- */
+.btn-outline { background: transparent; }
+.btn-ghost { background: transparent; border-color: transparent; }
+.btn-ghost:hover { background: var(--surface-2); border-color: transparent; }
+.btn-link { background: transparent; border-color: transparent; padding: 0; color: var(--link); }
+.btn-link:hover { background: transparent; border-color: transparent; text-decoration: underline; }
+.btn-sm { padding: 6px 10px; font-size: 11.5px; }
+.btn-lg { padding: 11px 18px; font-size: 13px; }
+.btn-icon { width: 34px; height: 34px; padding: 0; }
+
+/* --- dropdown / select / context menu --------------------------------------- */
+.menu-surface {
+  z-index: 90; min-width: 8rem; max-height: 292px; overflow: auto; padding: 5px; margin: 0;
+  background: var(--panel-2); border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  box-shadow: var(--shadow-2); color: var(--text);
+}
+.menu-item {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px;
+  border: 0; border-radius: 9px; background: transparent; text-align: left;
+  font-size: 12px; color: var(--text-dim); cursor: pointer; outline: none; user-select: none;
+  transition: background 0.12s ease, color 0.12s ease;
+  /* Radix marks the keyboard/hover position with a data attribute, so nothing here depends on :hover. */
+}
+.menu-item[data-highlighted], .menu-item[data-state="open"] { background: var(--surface-3); color: var(--text); }
+.menu-item[data-disabled] { opacity: 0.45; pointer-events: none; }
+.menu-item[data-danger] { color: var(--danger-text); }
+.menu-item[data-danger][data-highlighted] { background: var(--danger-bg); }
+.menu-item svg { flex: none; opacity: 0.9; }
+.menu-tick { margin-left: auto; color: var(--accent); }
+.menu-hint { margin-left: auto; color: var(--text-faint); font-size: 10px; }
+.menu-sep { height: 1px; margin: 5px 2px; background: var(--border); }
+.menu-label { padding: 7px 10px 4px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); }
+
+/* --- popover ---------------------------------------------------------------- */
+.popover-surface {
+  z-index: 90; width: min(92vw, 330px); padding: 14px;
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  box-shadow: var(--shadow-2); color: var(--text);
+}
+
+/* --- tooltip ---------------------------------------------------------------- */
+.tooltip-surface {
+  z-index: 100; padding: 6px 9px; background: var(--panel-2); border: 1px solid var(--border-strong);
+  border-radius: 9px; box-shadow: var(--shadow-1); font-size: 11px; color: var(--text);
+}
+
+/* --- dialog ----------------------------------------------------------------- */
+.dialog-overlay {
+  position: fixed; inset: 0; z-index: 80;
+  background: color-mix(in srgb, #04060b 62%, transparent);
+  backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+}
+.dialog-content {
+  position: fixed; z-index: 81; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(580px, calc(100vw - 32px)); max-height: min(88vh, 860px); overflow: auto; padding: 20px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+}
+/* Belt and braces: whatever keeps a closing layer in the DOM for a frame, it must not eat clicks. */
+.dialog-overlay[data-state="closed"],
+.dialog-content[data-state="closed"],
+.sheet-content[data-state="closed"],
+.menu-surface[data-state="closed"],
+.popover-surface[data-state="closed"],
+.tooltip-surface[data-state="closed"] { pointer-events: none; }
+
+/* --- sheet (a dialog anchored to an edge) ----------------------------------- */
+.sheet-content {
+  position: fixed; z-index: 81; inset: 0 auto 0 0; width: min(310px, 86vw);
+  padding: 18px 14px; overflow-y: auto;
+  background: var(--surface); border-right: 1px solid var(--border); box-shadow: var(--shadow-2);
+}
+
+/* --- checkbox / switch ------------------------------------------------------ */
+.checkbox-control {
+  width: 17px; height: 17px; flex: none; display: grid; place-items: center;
+  border: 1px solid var(--border-strong); border-radius: 6px; background: var(--field); color: #fff;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+.checkbox-control[data-state="checked"], .checkbox-control[data-state="indeterminate"] { background: var(--accent); border-color: var(--accent); }
+/* The mark is an SVG, so the line box must not add height or it drifts off centre. */
+.checkbox-indicator { display: grid; place-items: center; line-height: 0; }
+.checkbox-control:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.checkbox-control:disabled { opacity: 0.5; cursor: not-allowed; }
+.switch-control {
+  width: 36px; height: 20px; flex: none; padding: 2px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--surface-3); cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+.switch-control[data-state="checked"] { background: var(--accent); border-color: var(--accent); }
+.switch-control:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch-thumb { display: block; width: 14px; height: 14px; border-radius: 999px; background: #fff; transition: transform 0.16s ease; }
+.switch-control[data-state="checked"] .switch-thumb { transform: translateX(16px); }
+
+/* --- tabs ------------------------------------------------------------------- */
+.tabs-list { display: inline-flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface-2); }
+.tabs-trigger {
+  padding: 7px 12px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--text-dim); font-size: 11.5px; font-weight: 600; cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.tabs-trigger[data-state="active"] { background: var(--panel); color: var(--text); box-shadow: var(--shadow-1); }
+.tabs-trigger:disabled { opacity: 0.5; cursor: not-allowed; }
+/* The tab strip shares its row with whatever the active tab acts on, so the page header stays put. */
+.tabs-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.tabs-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tabs-count {
+  margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: var(--surface-3);
+  color: var(--muted); font-size: 9.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.tabs-trigger[data-state="active"] .tabs-count { background: var(--accent-soft); color: var(--accent); }
+.tabs-content { outline: none; }
+/* The inline tag creator, inside the card whose list it feeds. */
+.tag-add { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.tag-groups { display: grid; gap: 16px; margin-top: 16px; }
+.tag-group-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.tag-group-head b { font-size: 11.5px; text-transform: capitalize; }
+.tag-group-head .muted { font-size: 10.5px; }
+
+/* --- data table chrome (TanStack Table) ------------------------------------- */
+.dt-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.dt-toolbar-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dt-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dt-search { width: 230px; max-width: 100%; }
+.dt-search-wrap { flex: 0 1 230px; min-width: 0; }
+.dt-count { font-size: 11px; }
+.dt-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; font-size: 11px; }
+.dt-pager { display: flex; align-items: center; gap: 6px; }
+.dt-page-of { font-variant-numeric: tabular-nums; }
+/* A sortable header keeps the table's own type: the button is the <th>'s content, not a control. */
+.dt-sort {
+  display: inline-flex; align-items: center; gap: 5px; margin: 0; padding: 0;
+  border: 0; background: none; color: inherit; font: inherit;
+  text-transform: inherit; letter-spacing: inherit; cursor: pointer;
+}
+.dt-sort:hover { color: var(--text); }
+.dt-sort svg { opacity: 0.45; }
+.dt-sort[data-sorted="true"] { color: var(--text); }
+.dt-sort[data-sorted="true"] svg { opacity: 1; color: var(--accent); }
+.dt-colmenu { display: grid; gap: 3px; }
+.dt-collabel { display: flex; align-items: center; gap: 9px; padding: 6px 4px; font-size: 11.5px; color: var(--text-dim); cursor: pointer; }
+.dt-collabel:hover { color: var(--text); }
+.dt-colreset {
+  justify-self: start; margin-top: 4px; padding: 5px 4px 1px; border: 0; background: transparent;
+  color: var(--accent); font: inherit; font-size: 10.5px; font-weight: 600; cursor: pointer;
+}
+.dt-colreset:hover { text-decoration: underline; }
+
+/* --- form field, label and hint --------------------------------------------- */
+.form-field { display: grid; gap: 7px; }
+.ctl-label { font-size: 10.5px; font-weight: 600; color: var(--text-dim); line-height: 1.35; }
+.ctl-label[data-slot="label"] { display: inline-flex; align-items: center; gap: 6px; }
+.ctl-hint { font-size: 9.5px; font-weight: 400; color: var(--text-faint); line-height: 1.45; }
+.form-error { font-size: 10.5px; color: var(--danger-text); }
+
+/* --- card slots ------------------------------------------------------------- */
+/* A card is a bare surface; the slots are what carry the padding, so a header and a body do not
+   each add their own gap. */
+.card-header { padding: 20px 20px 0; }
+.card-content { padding: 20px; }
+.card-header + .card-content { padding-top: 14px; }
+.card-footer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 0 20px 20px; }
+.card-title { font-size: 13.5px; font-weight: 700; letter-spacing: -0.02em; }
+.card-action { margin-left: auto; }
+
+/* --- alert ----------------------------------------------------------------- */
+.ctl-alert { padding: 11px 13px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--tile); font-size: 12px; }
+.ctl-alert-title { font-weight: 700; }
+.ctl-alert-desc { margin-top: 3px; font-size: 11.5px; color: var(--text-dim); }
+
+/* --- dialog head ------------------------------------------------------------ */
+.dialog-header { display: grid; gap: 4px; }
+.dialog-title { font-size: 14.5px; font-weight: 800; letter-spacing: -0.02em; }
+.dialog-description { font-size: 11.5px; line-height: 1.5; }
+.dialog-close { position: absolute; top: 14px; right: 14px; }
+
+/* --- sheet head ------------------------------------------------------------- */
+.sheet-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+
+/* --- menu icon slot (checkbox / radio items) -------------------------------- */
+.menu-check { display: grid; place-items: center; width: 14px; height: 14px; flex: none; color: var(--accent); }
+
+/* --- progress --------------------------------------------------------------- */
+.progress-track { width: 100%; height: 8px; overflow: hidden; border-radius: 999px; background: var(--surface-3); }
+.progress-fill { width: 100%; height: 100%; background-image: var(--grad-accent); transition: transform 0.3s ease; }
+
+/* --- scroll area ------------------------------------------------------------ */
+.scroll-area { position: relative; overflow: hidden; }
+.scroll-area-viewport { width: 100%; height: 100%; border-radius: inherit; }
+.scroll-area-bar { display: flex; width: 10px; padding: 1px; user-select: none; touch-action: none; }
+.scroll-area-thumb { flex: 1; border-radius: 999px; background: var(--scroll-thumb); }
+
+/* --- avatar ----------------------------------------------------------------- */
+.avatar-image { width: 100%; height: 100%; border-radius: 999px; object-fit: cover; }
+.avatar-fallback { display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+
+/* --- sonner (toasts) -------------------------------------------------------- */
+[data-sonner-toaster] { --normal-bg: var(--panel); --normal-border: var(--border); --normal-text: var(--text); font-family: var(--font-sans); }
 
 /* ================================================================ responsive */
 @media (max-width: 1350px) {
@@ -675,23 +985,31 @@ button.year-cell:disabled { cursor: default; }
   .filter-head { align-items: flex-start; flex-wrap: wrap; }
   .content { padding: 16px 14px 24px; }
   .card-pad { padding: 15px; }
-  .stat-value { font-size: 22px; }
-  .page-head h1 { font-size: 19px; }
+  .card-header { padding: 15px 15px 0; }
+  .card-content { padding: 15px; }
+  .card-footer { padding: 0 15px 15px; }
+  /* The toolbar stacks, so the search takes the whole row instead of sitting in a 230px sliver. */
+  .dt-toolbar-main { flex: 1 1 100%; }
+  .dt-search-wrap { flex: 1 1 auto; }
+  .dt-search { width: 100%; }
+  .dialog-content { width: calc(100vw - 20px); padding: 16px; }
+  .stat-value { font-size: 18px; }
+  .page-head h1 { font-size: 17px; }
   .page-head-actions { width: 100%; }
   .page-head-actions .btn { flex: 1 1 auto; }
   .calendar-grid { gap: 4px; }
-  .calendar-weekday { font-size: 9.5px; padding: 2px 3px; }
+  .calendar-weekday { font-size: 9px; padding: 2px 3px; }
   .calendar-cell { min-height: 58px; padding: 5px; }
-  .calendar-day { font-size: 9.5px; }
-  .calendar-pnl { font-size: 9.5px; line-height: 1.15; }
-  .cal-meta { font-size: 8.5px; }
+  .calendar-day { font-size: 9px; }
+  .calendar-pnl { font-size: 9px; line-height: 1.15; }
+  .cal-meta { font-size: 8px; }
   /* The percent does not fit a 45px cell; it is one tap away in the day pop-up. */
   .cal-pct { display: none; }
   .cal-today-tag { display: none; }
-  .cal-legend { font-size: 10.5px; }
+  .cal-legend { font-size: 9.5px; }
   .year-row { grid-template-columns: 58px repeat(13, minmax(96px, 1fr)); gap: 5px; }
-  .year-pnl { font-size: 11.5px; }
-  .year-count { font-size: 9.5px; }
+  .year-pnl { font-size: 10.5px; }
+  .year-count { font-size: 9px; }
   .cal-nav { gap: 6px; }
   .cal-nav-group { gap: 3px; }
   .cal-pickers { order: 3; flex: 1 1 100%; }
@@ -699,30 +1017,37 @@ button.year-cell:disabled { cursor: default; }
   .icon-btn { width: 32px; height: 32px; }
   /* Five columns still fit a phone-width card at this size, so no breakdown scrolls sideways.
      The band name ("Over 3 weeks") is the only cell long enough to need two lines. */
-  .table-compact th { padding: 8px 5px; font-size: 9.5px; }
-  .table-compact td { padding: 8px 5px; font-size: 11.5px; }
+  .table-compact th { padding: 8px 5px; font-size: 9px; }
+  .table-compact td { padding: 8px 5px; font-size: 10px; }
   .table-compact th:first-child, .table-compact td:first-child { white-space: normal; }
   .modal-backdrop { padding: 10px; align-items: end; }
   .day-modal { padding: 16px; max-height: 92vh; }
-  .day-pnl { font-size: 21px; }
+  .day-pnl { font-size: 19px; }
   .day-tiles { gap: 8px; }
   .day-tile { padding: 9px 10px; }
-  .day-tile .metric-value { font-size: 13px; }
-  /* The nav becomes a bottom bar so a phone keeps the full content width. It sits above the
-     page content and the body clears it, so the last row is never tucked behind the menu. */
-  .sidebar {
-    inset: auto 0 0 0; width: 100%; height: 64px; z-index: 30;
-    display: flex; align-items: center; gap: 4px;
-    padding: 6px 10px calc(6px + env(safe-area-inset-bottom)); overflow-x: auto; overflow-y: hidden;
-    border-right: 0; border-top: 1px solid var(--border);
-    background: var(--surface); box-shadow: 0 -12px 26px -20px rgba(0, 0, 0, 0.7);
+  .day-tile .metric-value { font-size: 12px; }
+  /* The rail gives way to the bottom bar so a phone keeps the full content width, and the bar
+     sits above the page content — the body clears it so no row is tucked behind the menu. */
+  .sidebar { display: none; }
+  .mobile-nav {
+    position: fixed; inset: auto 0 0 0; z-index: 30;
+    display: flex; align-items: stretch; gap: 4px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border); background: var(--surface);
+    box-shadow: 0 -12px 26px -20px rgba(0, 0, 0, 0.7);
   }
-  .sidebar .brand, .sidebar .section-label { display: none; }
-  .sidebar nav { display: flex; gap: 4px; }
-  .sidebar .nav-item { flex: 0 0 auto; flex-direction: column; gap: 3px; padding: 7px 10px; margin: 0; font-size: 10px; }
-  .sidebar .nav-item:hover { transform: none; background: transparent; }
-  .sidebar .nav-item.active:hover { background: var(--accent-soft); }
-  .sidebar .nav-text { display: block; font-size: 10px; }
+  .mobile-nav .nav-item {
+    flex: 1 1 0; min-width: 0; justify-content: center; flex-direction: column; gap: 3px;
+    padding: 7px 2px; margin: 0; font-size: 9.5px; cursor: pointer;
+    border: 0; background: transparent; text-align: center;
+  }
+  .mobile-nav .nav-item:hover { transform: none; background: transparent; color: var(--text); }
+  .mobile-nav .nav-item.active { color: var(--accent); }
+  .mobile-nav .nav-item.active:hover { background: var(--accent-soft); }
+  .mobile-nav .nav-text {
+    display: block; font-size: 9.5px; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   /* Clears the 64px bottom nav (plus a phone's home indicator) so no row hides behind it. */
   .main { margin-left: 0; width: 100%; padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
   /* The quick-add floats just above that nav and sheds its label on a phone. */
@@ -745,3 +1070,5 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-delay: 0ms !important; transition-duration: 0.001ms !important; }
 }
+
+} /* @layer components */

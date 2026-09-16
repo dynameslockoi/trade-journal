@@ -1,6 +1,6 @@
-"use client";
-import{useEffect,useState}from"react";import{createClient}from"@/lib/supabase/client";import{PageHeader}from"@/components/page-header";import{Select}from"@/components/select";
-export default function Tags(){const[items,setItems]=useState<any[]>([]),[name,setName]=useState(""),[category,setCategory]=useState("setup");const load=async()=>{const{data}=await createClient().from("tags").select("*").order("category").order("name");setItems(data??[])};useEffect(()=>{load()},[]);
- async function add(e:React.FormEvent){e.preventDefault();const s=createClient();const{data:{user}}=await s.auth.getUser();if(!user)return;const{error}=await s.from("tags").insert({user_id:user.id,name:name.trim(),category});if(error)alert(error.message);else{name&&setName("");load()}}
- async function del(id:string){await createClient().from("tags").delete().eq("id",id);load()}
- return <div className="content" style={{maxWidth:900}}><PageHeader title="Tags" subtitle="Create reusable setup, mistake and market-condition labels."/><div className="card card-pad"><form onSubmit={add} style={{display:"flex",gap:8}}><input className="input" placeholder="Tag name" required value={name} onChange={e=>setName(e.target.value)}/><Select aria-label="Category" style={{maxWidth:180}} value={category} onChange={setCategory}><option>setup</option><option>mistake</option><option>condition</option><option>custom</option></Select><button className="btn btn-primary">Add</button></form></div><div className="card card-pad"><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{items.map(t=><span className="tag-chip" key={t.id}>{t.name}<small>{t.category}</small><button onClick={()=>del(t.id)} aria-label={`Delete ${t.name}`}>×</button></span>)}</div>{!items.length&&<div className="empty">No tags yet.</div>}</div></div>}
+import { redirect } from "next/navigation";
+
+/** Tags moved in with strategies; the old address stays valid for bookmarks and stale links. */
+export default function Tags() {
+  redirect("/strategies");
+}

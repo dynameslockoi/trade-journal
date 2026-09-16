@@ -1,10 +1,14 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { PageHeader } from "@/components/page-header";
-
-type Notice = { kind: "error" | "success"; text: string };
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export default function Settings() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -12,7 +16,6 @@ export default function Settings() {
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -31,107 +34,120 @@ export default function Settings() {
     })();
   }, []);
 
-  const flash = (notice: Notice) => {
-    setNotice(notice);
-    setTimeout(() => setNotice(null), 6000);
-  };
-
   async function saveName(e: React.FormEvent) {
     e.preventDefault();
     if (!userId) return;
     const trimmed = name.trim();
-    if (!trimmed) return flash({ kind: "error", text: "Enter a name." });
-    if (trimmed.length > 60) return flash({ kind: "error", text: "Keep the name under 60 characters." });
+    if (!trimmed) { toast.error("Enter a name."); return; }
+    if (trimmed.length > 60) { toast.error("Keep the name under 60 characters."); return; }
     setBusy(true);
     const s = createClient();
     // Upsert covers a missing profile row; the RLS policy allows only your own id.
     const { error } = await s.from("profiles").upsert({ id: userId, display_name: trimmed }, { onConflict: "id" });
     if (!error) await s.auth.updateUser({ data: { display_name: trimmed } });
     setBusy(false);
-    flash(error ? { kind: "error", text: error.message } : { kind: "success", text: "Name updated." });
+    if (error) toast.error(error.message);
+    else toast.success("Name updated.");
   }
 
   async function saveEmail(e: React.FormEvent) {
     e.preventDefault();
     const next = email.trim();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(next)) return flash({ kind: "error", text: "Enter a valid email address." });
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(next)) { toast.error("Enter a valid email address."); return; }
     setBusy(true);
     const { error } = await createClient().auth.updateUser({ email: next });
     setBusy(false);
-    flash(error
-      ? { kind: "error", text: error.message }
-      : { kind: "success", text: `Confirmation link sent to ${next}. Your current address keeps working until you confirm it.` });
+    if (error) toast.error(error.message);
+    else toast.success(`Confirmation link sent to ${next}.`, { description: "Your current address keeps working until you confirm it." });
   }
 
   async function savePassword(e: React.FormEvent) {
     e.preventDefault();
-    if (password.length < 8) return flash({ kind: "error", text: "Use at least 8 characters." });
-    if (password !== confirm) return flash({ kind: "error", text: "The two passwords do not match." });
+    if (password.length < 8) { toast.error("Use at least 8 characters."); return; }
+    if (password !== confirm) { toast.error("The two passwords do not match."); return; }
     setBusy(true);
     const { error } = await createClient().auth.updateUser({ password });
     setBusy(false);
     if (!error) { setPassword(""); setConfirm(""); }
-    flash(error ? { kind: "error", text: error.message } : { kind: "success", text: "Password changed." });
+    if (error) toast.error(error.message);
+    else toast.success("Password changed.");
   }
 
-  return <div className="content" style={{ maxWidth: 820 }}>
+  return <div className="content max-w-[820px]">
     <PageHeader title="Settings" subtitle="Your account, sign-in details and where the journal's numbers come from." />
 
-    {notice && <div className={notice.kind === "error" ? "error" : "success"}>{notice.text}</div>}
+    {loading ? <Card><CardContent>Loading your account…</CardContent></Card> : <>
+      <Card className="settings-card">
+        <form onSubmit={saveName}>
+          <CardHeader><CardTitle>Profile</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid two">
+              <div className="form-field">
+                <Label htmlFor="set-name">Display name</Label>
+                <Input id="set-name" value={name} onChange={e => setName(e.target.value)} placeholder="Your name" maxLength={60} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="set-email-readonly">Email</Label>
+                <Input id="set-email-readonly" value={email} readOnly disabled />
+              </div>
+            </div>
+          </CardContent>
+          <CardFooter className="settings-foot">
+            <span className="muted">Shown as the avatar tooltip, and to you alone.</span>
+            <Button disabled={busy}>Save name</Button>
+          </CardFooter>
+        </form>
+      </Card>
 
-    {loading ? <div className="card card-pad">Loading your account…</div> : <>
-      <form className="card card-pad settings-card" onSubmit={saveName}>
-        <h3>Profile</h3>
-        <div className="grid two">
-          <label className="field">Display name
-            <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Your name" maxLength={60} />
-          </label>
-          <label className="field">Email
-            <input className="input" value={email} readOnly disabled />
-          </label>
-        </div>
-        <div className="settings-foot">
-          <span className="muted">Shown as the avatar tooltip, and to you alone.</span>
-          <button className="btn btn-primary" disabled={busy}>Save name</button>
-        </div>
-      </form>
+      <Card className="settings-card">
+        <form onSubmit={saveEmail}>
+          <CardHeader><CardTitle>Email address</CardTitle></CardHeader>
+          <CardContent>
+            <div className="form-field">
+              <Label htmlFor="set-email">Sign-in email</Label>
+              <Input id="set-email" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />
+            </div>
+          </CardContent>
+          <CardFooter className="settings-foot">
+            <span className="muted">We send a confirmation link to the new address before it takes over.</span>
+            <Button disabled={busy}>Update email</Button>
+          </CardFooter>
+        </form>
+      </Card>
 
-      <form className="card card-pad settings-card" onSubmit={saveEmail}>
-        <h3>Email address</h3>
-        <label className="field">Sign-in email
-          <input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />
-        </label>
-        <div className="settings-foot">
-          <span className="muted">We send a confirmation link to the new address before it takes over.</span>
-          <button className="btn btn-primary" disabled={busy}>Update email</button>
-        </div>
-      </form>
+      <Card className="settings-card">
+        <form onSubmit={savePassword}>
+          <CardHeader><CardTitle>Password</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid two">
+              <div className="form-field">
+                <Label htmlFor="set-password">New password</Label>
+                <Input id="set-password" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" placeholder="At least 8 characters" />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="set-confirm">Confirm password</Label>
+                <Input id="set-confirm" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" />
+              </div>
+            </div>
+          </CardContent>
+          <CardFooter className="settings-foot">
+            <span className="muted">You stay signed in on this device after changing it.</span>
+            <Button disabled={busy}>Change password</Button>
+          </CardFooter>
+        </form>
+      </Card>
 
-      <form className="card card-pad settings-card" onSubmit={savePassword}>
-        <h3>Password</h3>
-        <div className="grid two">
-          <label className="field">New password
-            <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" placeholder="At least 8 characters" />
-          </label>
-          <label className="field">Confirm password
-            <input className="input" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" />
-          </label>
-        </div>
-        <div className="settings-foot">
-          <span className="muted">You stay signed in on this device after changing it.</span>
-          <button className="btn btn-primary" disabled={busy}>Change password</button>
-        </div>
-      </form>
-
-      <div className="card card-pad settings-card">
-        <h3>Journal</h3>
-        <p className="muted" style={{ margin: 0 }}>
-          Starting capital, currency, broker and risk limits belong to each trading account — set them on the{" "}
-          <Link className="link" href="/accounts">Accounts page</Link>. Money is shown in the account's currency
-          (MYR reads as RM) with thousands grouped, and the calendar's return on capital is measured against
-          those starting balances.
-        </p>
-      </div>
+      <Card className="settings-card">
+        <CardHeader><CardTitle>Journal</CardTitle></CardHeader>
+        <CardContent>
+          <p className="muted m-0">
+            Starting capital, currency, broker and risk limits belong to each trading account — set them on the{" "}
+            <Link className="link" href="/accounts">Accounts page</Link>. Money is shown in the account's currency
+            (MYR reads as RM) with thousands grouped, and the calendar's return on capital is measured against
+            those starting balances.
+          </p>
+        </CardContent>
+      </Card>
     </>}
   </div>;
 }

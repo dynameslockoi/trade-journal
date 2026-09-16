@@ -21,8 +21,8 @@ export default async function RootLayout({children}:{children:React.ReactNode}) 
               <div className="auth-logo">T</div>
               <h1>Supabase is not configured</h1>
               <p className="muted">Create a <code>.env.local</code> file in the project root with your project credentials, then restart the dev server.</p>
-              <pre className="input" style={{whiteSpace:"pre-wrap",marginTop:14,fontSize:12}}>{`NEXT_PUBLIC_SUPABASE_URL=your-project-url\nNEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-or-publishable-key`}</pre>
-              <p className="muted" style={{fontSize:12}}>Then run <code>supabase/schema.sql</code> in the Supabase SQL editor and keep the <code>trade-screenshots</code> bucket private.</p>
+              <pre className="input" style={{whiteSpace:"pre-wrap",marginTop:14,fontSize:11}}>{`NEXT_PUBLIC_SUPABASE_URL=your-project-url\nNEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-or-publishable-key`}</pre>
+              <p className="muted" style={{fontSize:11}}>Then run <code>supabase/schema.sql</code> in the Supabase SQL editor and keep the <code>trade-screenshots</code> bucket private.</p>
             </div>
           </main>
         </body>

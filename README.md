@@ -1,3 +1,27 @@
+## Phase 11
+
+Every date field in the app is now its own control — a `react-day-picker` month grid in a Radix
+popover (`components/ui/date-picker.tsx`), for the filter bar's From/To, both trade forms' entry and
+exit stamps, the reviews dates and the zakat payment date. The browser's own `<input type="date">`
+pop-up ignores CSS custom properties, so it arrived as a light sheet in dark mode; these follow the
+same tokens as everything else. Values are unchanged (`YYYY-MM-DD`, `YYYY-MM-DDTHH:mm`), converted in
+local time by `lib/dates.ts`. **Tags moved in with Strategies** — one page, two tabs, with `/tags`
+redirecting there, so two small label lists no longer hold two sidebar slots. The journal's column menu
+got its tick back (the mark was 12px with a 1.5px stroke in a 17px box, which read as a smudge) and no
+longer ends in a label-less row. See `PHASE11.md`.
+
+## Phase 10
+
+The UI is built on **shadcn/ui** with **Radix** primitives, and the journal's table on **TanStack
+Table** — sorting, free-text search, paging and a column-visibility menu. The colours did not move:
+an `@theme inline` bridge points shadcn's semantic names (`bg-card`, `border-border`, `rounded-md`)
+at the tokens already in `app/globals.css`, so there is still one place a colour is written down.
+The stylesheet now lives in `@layer components` so a utility written next to one of its classes
+actually applies. What changed in behaviour: the hand-rolled listbox is a real Radix **Select**, the
+calendar day pop-up is a Radix **Dialog**, deletes ask in a themed **AlertDialog** instead of the
+browser's `confirm()`, Settings and Reviews report through **toasts**, and the phone's navigation is
+a bottom bar with a **More** sheet rather than ten icons scrolling sideways. See `PHASE10.md`.
+
 ## Phase 9
 
 The full diary came in: **208 trades across 2020–2026** from `record.xlsx`, tagged `record.xlsx diary`
@@ -6,10 +30,10 @@ yellow `IPO` badge in the journal and on the trade page, a checkbox on both form
 — and a new **Zakat page** computes each year's zakat (2.5% by default, editable per year) against a
 choice of base, with an optional nisab threshold and a log of payments already made. Run the Phase 9
 block in `supabase/schema.sql` to enable the IPO flags, the zakat settings and the payment records;
-the journal and the zakat figures work either way. Every dropdown is now the app's own listbox
-(`components/select.tsx`) instead of a browser `<select>`, which the browser draws in its own colours —
-themed in both light and dark, keyboard-driven, and unable to run off the edge of the window. See
-`PHASE9.md`.
+the journal and the zakat figures work either way. Every dropdown is the app's own listbox instead of
+a browser `<select>`, which the browser draws in its own colours — themed in both light and dark,
+keyboard-driven, and unable to run off the edge of the window. (Phase 10 rebuilt it as a Radix Select
+in `components/ui/select.tsx`.) See `PHASE9.md`.
 
 # Trading Journal Pro — Phase 4
 

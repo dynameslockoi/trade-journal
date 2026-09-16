@@ -1,8 +1,10 @@
 "use client";
+
 import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 /** Routes where a quick-add would only point at the form you are already looking at. */
 const hiddenHere = (path: string) => path === "/journal/new" || /^\/journal\/[^/]+\/edit$/.test(path);
@@ -17,7 +19,7 @@ function isTyping(target: EventTarget | null) {
 /**
  * Log a trade from anywhere: a floating button bottom-right (above the phone's bottom nav) and the
  * `N` key. The key is ignored while you are typing, when a modifier is held, and while a pop-up
- * (the calendar day dialog, or an open dropdown) owns the keyboard.
+ * (the calendar day dialog, a menu, an open select list) owns the keyboard.
  */
 export function QuickAdd() {
   const path = usePathname();
@@ -30,8 +32,8 @@ export function QuickAdd() {
       if (event.key !== "n" && event.key !== "N") return;
       if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
       if (isTyping(event.target) || document.querySelector('[role="dialog"]')) return;
-      // An open <Select> list is a keyboard surface of its own — leave "n" to it.
-      if (document.querySelector('[role="listbox"]')) return;
+      // An open listbox or menu is a keyboard surface of its own — leave "n" to it.
+      if (document.querySelector('[role="listbox"], [role="menu"]')) return;
       event.preventDefault();
       router.push("/journal/new");
     };
@@ -41,14 +43,13 @@ export function QuickAdd() {
 
   if (hidden) return null;
 
-  return <Link
-    className="fab"
-    href="/journal/new"
-    aria-keyshortcuts="n"
-    title="Log a trade — press N"
-  >
-    <Plus size={18} />
-    <span className="fab-label">Add trade</span>
-    <kbd className="fab-key">N</kbd>
-  </Link>;
+  return (
+    <Button asChild className="fab">
+      <Link href="/journal/new" aria-keyshortcuts="n" title="Log a trade — press N">
+        <Plus size={18} />
+        <span className="fab-label">Add trade</span>
+        <kbd className="fab-key">N</kbd>
+      </Link>
+    </Button>
+  );
 }

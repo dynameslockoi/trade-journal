@@ -1,8 +1,14 @@
 "use client";
+
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useParams, useRouter } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
+import { ConfirmButton } from "@/components/confirm-button";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { describeLeg } from "@/lib/fees";
 import { formatDuration, formatMoney, formatNumber, formatPrice, formatR, normalizeTrade, shortDateTime } from "@/lib/trading";
 
@@ -28,17 +34,16 @@ export default function Detail() {
   })(); }, [id]);
 
   async function remove() {
-    if (!confirm("Delete this trade permanently? Screenshots attached to it will also be removed.")) return;
     const s = createClient();
     const { data: files } = await s.from("trade_screenshots").select("storage_path").eq("trade_id", id);
     if (files?.length) await s.storage.from("trade-screenshots").remove(files.map((x: any) => x.storage_path));
     const { error } = await s.from("trades").delete().eq("id", id);
-    if (error) alert(error.message);
+    if (error) toast.error(error.message);
     else router.push("/journal");
   }
 
   if (loading) return <div className="content"><div className="muted">Loading…</div></div>;
-  if (!t) return <div className="content"><div className="card card-pad">Trade not found.</div></div>;
+  if (!t) return <div className="content"><Card><CardContent>Trade not found.</CardContent></Card></div>;
 
   const currency = t.trading_accounts?.currency;
   const gross = Number(t.gross_pnl || 0);
@@ -48,15 +53,21 @@ export default function Detail() {
   const entryValue = Number(t.position_size || 0) * Number(t.entry_price || 0);
   const exitValue = Number(t.position_size || 0) * Number(t.exit_price || 0);
 
-  return <div className="content" style={{ maxWidth: 1100 }}>
+  return <div className="content max-w-[1100px]">
     <PageHeader
       eyebrow="Journal / Trade"
-      title={<>{t.symbol}{t.is_ipo && <span className="badge badge-ipo">IPO</span>}</>}
+      title={<>{t.symbol}{t.is_ipo && <Badge variant="ipo" className="ml-2">IPO</Badge>}</>}
       subtitle={shortDateTime(t.entry_at)}
       actions={<>
-        <button className="btn" onClick={() => router.push("/journal")}>Back</button>
-        <button className="btn" onClick={() => router.push(`/journal/${id}/edit`)}>Edit</button>
-        <button className="btn danger-btn" onClick={remove}>Delete</button>
+        <Button variant="secondary" onClick={() => router.push("/journal")}>Back</Button>
+        <Button variant="secondary" onClick={() => router.push(`/journal/${id}/edit`)}>Edit</Button>
+        <ConfirmButton
+          title="Delete this trade permanently?"
+          description="Screenshots attached to it are removed from storage as well."
+          onConfirm={remove}
+        >
+          Delete
+        </ConfirmButton>
       </>}
     />
 
@@ -74,64 +85,77 @@ export default function Detail() {
     </div>
 
     <div className="grid two">
-      <div className="card card-pad">
-        <h3>Trade Details</h3>
-        <div className="detail-grid">
-          <Field label="Account" value={t.trading_accounts?.name} />
-          <Field label="Strategy" value={t.strategies?.name} />
-          <Field label="Asset class" value={t.asset_class} />
-          <Field label="Broker" value={t.fee_breakdown?.brokerName} />
-          <Field label="Entry" value={formatPrice(t.entry_price, currency)} />
-          <Field label="Exit" value={formatPrice(t.exit_price, currency)} />
-          <Field label="Position" value={`${qty} shares`} />
-          <Field label="Stop Loss" value={formatPrice(t.stop_loss, currency)} />
-          <Field label="Take Profit" value={formatPrice(t.take_profit, currency)} />
-          <Field label="Session" value={t.session} />
-          <Field label="Risk %" value={t.risk_percent} />
-          <Field label="MAE" value={t.mae} />
-          <Field label="MFE" value={t.mfe} />
-        </div>
-      </div>
-      <div className="card card-pad">
-        <h3>Psychology</h3>
-        <div className="detail-grid">
-          <Field label="Emotion" value={t.emotion} />
-          <Field label="Mistake" value={t.mistake} />
-          <Field label="Setup Quality" value={t.setup_quality} />
-          <Field label="Execution Quality" value={t.execution_quality} />
-          <Field label="Discipline" value={t.discipline} />
-        </div>
-        <h3 style={{ marginTop: 20 }}>Tags</h3>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {tags.map((x: any) => <span className="badge" key={x.tags.name}>{x.tags.name}</span>)}
-          {!tags.length && <span className="muted" style={{ fontSize: 12.5 }}>No tags.</span>}
-        </div>
-      </div>
+      <Card>
+        <CardHeader><CardTitle>Trade Details</CardTitle></CardHeader>
+        <CardContent>
+          <div className="detail-grid">
+            <Field label="Account" value={t.trading_accounts?.name} />
+            <Field label="Strategy" value={t.strategies?.name} />
+            <Field label="Asset class" value={t.asset_class} />
+            <Field label="Broker" value={t.fee_breakdown?.brokerName} />
+            <Field label="Entry" value={formatPrice(t.entry_price, currency)} />
+            <Field label="Exit" value={formatPrice(t.exit_price, currency)} />
+            <Field label="Position" value={`${qty} shares`} />
+            <Field label="Stop Loss" value={formatPrice(t.stop_loss, currency)} />
+            <Field label="Take Profit" value={formatPrice(t.take_profit, currency)} />
+            <Field label="Session" value={t.session} />
+            <Field label="Risk %" value={t.risk_percent} />
+            <Field label="MAE" value={t.mae} />
+            <Field label="MFE" value={t.mfe} />
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>Psychology</CardTitle></CardHeader>
+        <CardContent>
+          <div className="detail-grid">
+            <Field label="Emotion" value={t.emotion} />
+            <Field label="Mistake" value={t.mistake} />
+            <Field label="Setup Quality" value={t.setup_quality} />
+            <Field label="Execution Quality" value={t.execution_quality} />
+            <Field label="Discipline" value={t.discipline} />
+          </div>
+          <CardTitle className="mt-5 mb-2">Tags</CardTitle>
+          <div className="flex flex-wrap gap-1.5">
+            {tags.map((x: any) => <Badge key={x.tags.name}>{x.tags.name}</Badge>)}
+            {!tags.length && <span className="muted text-[11.5px]">No tags.</span>}
+          </div>
+        </CardContent>
+      </Card>
     </div>
 
-    <div className="card card-pad">
-      <h3>Charges</h3>
-      <div className="fee-breakdown">
-        <div className="fee-row"><span className="muted">Opening contract {formatMoney(entryValue, currency)}</span><span>{legText(t.fee_breakdown?.open, currency)}</span></div>
-        <div className="fee-row"><span className="muted">Closing contract {formatMoney(exitValue, currency)}</span><span>{legText(t.fee_breakdown?.close, currency)}</span></div>
-        <div className="fee-row"><span className="muted">Commission (brokerage + platform + SST)</span><span>{formatMoney(t.commission, currency)}</span></div>
-        <div className="fee-row"><span className="muted">Exchange fees (clearing + stamp duty)</span><span>{formatMoney(t.fees, currency)}</span></div>
-        <div className="fee-row"><span className="muted">Swap / overnight</span><span>{formatMoney(t.swap, currency)}</span></div>
-        <div className="fee-row fee-total"><span>Total charges</span><span>{formatMoney(totalCharges, currency)}</span></div>
-      </div>
-    </div>
+    <Card>
+      <CardHeader><CardTitle>Charges</CardTitle></CardHeader>
+      <CardContent>
+        <div className="fee-breakdown">
+          <div className="fee-row"><span className="muted">Opening contract {formatMoney(entryValue, currency)}</span><span>{legText(t.fee_breakdown?.open, currency)}</span></div>
+          <div className="fee-row"><span className="muted">Closing contract {formatMoney(exitValue, currency)}</span><span>{legText(t.fee_breakdown?.close, currency)}</span></div>
+          <div className="fee-row"><span className="muted">Commission (brokerage + platform + SST)</span><span>{formatMoney(t.commission, currency)}</span></div>
+          <div className="fee-row"><span className="muted">Exchange fees (clearing + stamp duty)</span><span>{formatMoney(t.fees, currency)}</span></div>
+          <div className="fee-row"><span className="muted">Swap / overnight</span><span>{formatMoney(t.swap, currency)}</span></div>
+          <div className="fee-row fee-total"><span>Total charges</span><span>{formatMoney(totalCharges, currency)}</span></div>
+        </div>
+      </CardContent>
+    </Card>
 
-    <div className="card card-pad"><h3>Notes</h3><p style={{ whiteSpace: "pre-wrap", lineHeight: 1.7, margin: 0 }}>{t.notes || "No notes recorded."}</p></div>
+    <Card>
+      <CardHeader><CardTitle>Notes</CardTitle></CardHeader>
+      <CardContent>
+        <p className="whitespace-pre-wrap leading-[1.7] m-0">{t.notes || "No notes recorded."}</p>
+      </CardContent>
+    </Card>
 
-    <div className="card card-pad">
-      <h3>Screenshots</h3>
-      {shots.length ? <div className="shot-grid">{shots.map((x: any) => <Screenshot key={x.id} path={x.storage_path} />)}</div> : <div className="empty">No screenshots.</div>}
-    </div>
+    <Card>
+      <CardHeader><CardTitle>Screenshots</CardTitle></CardHeader>
+      <CardContent>
+        {shots.length ? <div className="shot-grid">{shots.map((x: any) => <Screenshot key={x.id} path={x.storage_path} />)}</div> : <div className="empty">No screenshots.</div>}
+      </CardContent>
+    </Card>
   </div>;
 }
 
 function Tile({ label, value, tone }: { label: string; value: string; tone?: "positive" | "negative" }) {
-  return <div className="card card-pad"><div className="metric-label">{label}</div><div className={`metric-value ${tone ?? ""}`}>{value}</div></div>;
+  return <Card className="card-pad"><div className="metric-label">{label}</div><div className={`metric-value ${tone ?? ""}`}>{value}</div></Card>;
 }
 
 function Field({ label, value }: { label: string; value: unknown }) {
@@ -146,5 +170,5 @@ function legText(leg: any, currency?: string | null) {
 function Screenshot({ path }: { path: string }) {
   const [uri, setUri] = useState("");
   useEffect(() => { createClient().storage.from("trade-screenshots").createSignedUrl(path, 3600).then(({ data }) => setUri(data?.signedUrl ?? "")) }, [path]);
-  return uri ? <img src={uri} alt="Trade screenshot" style={{ width: "100%", borderRadius: 12, border: "1px solid var(--border)" }} /> : <div className="muted">Loading image…</div>;
+  return uri ? <img src={uri} alt="Trade screenshot" className="w-full rounded-xl border border-[var(--border)]" /> : <div className="muted">Loading image…</div>;
 }

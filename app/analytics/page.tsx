@@ -5,6 +5,8 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContaine
 import { FilterBar, applyFilters, emptyFilters, type Filters } from "@/components/filter-bar";
 import { StatCard } from "@/components/stat-card";
 import { PageHeader } from "@/components/page-header";
+import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CHART, axisProps, barCursor, gridProps, pnlColor, tooltipProps } from "@/components/chart-theme";
 import {
   bestStreak, calculateStats, formatMoney, holdingBucket, HOLDING_BUCKETS, HOUR_BUCKETS, hourBucket,
@@ -76,7 +78,7 @@ function grouped(ts: Trade[], key: GroupKey): GroupRow[] {
 }
 
 /** Bar chart of P&L per group, green for profit and red for loss. */
-function PnlBars({ data, height = 280, currency, tickFontSize = 11, tickInterval }: {
+function PnlBars({ data, height = 280, currency, tickFontSize = 10, tickInterval }: {
   data: { name: string; pnl: number; trades?: number }[];
   height?: number;
   currency?: string | null;
@@ -165,7 +167,7 @@ export default function Analytics() {
     <div className="content">
       <PageHeader title="Analytics" subtitle="Measure where your edge actually comes from." />
       <FilterBar filters={filters} setFilters={setFilters} accounts={accounts} strategies={strategies} tags={tags} />
-      {loading ? <div className="card card-pad">Loading analytics…</div> : <>
+      {loading ? <Card><CardContent>Loading analytics…</CardContent></Card> : <>
         <div className="grid four">
           <StatCard label="Net P&L" value={formatMoney(stats.pnl, currency, true)} positive={stats.pnl >= 0} />
           <StatCard label="Win Rate" value={`${stats.winRate.toFixed(1)}%`} />
@@ -185,23 +187,26 @@ export default function Analytics() {
 
         <div className="grid two">
           {([
-            ["Strategy P&L", strategy, "By the setup each trade was tagged with.", 11],
-            ["Hourly P&L", hour, "Which Bursa hour pays you — the axis skips the 12:30–14:30 break.", 10, 0],
-            ["Holding Period P&L", holding, "Does letting a winner run, or cutting it fast, actually pay?", 10],
-            ["Position Size P&L", lots, "Board lots of 100 shares — the same size, every time?", 10],
-            ["Weekday P&L", weekday, "Which days of the week you give money back.", 11],
-            ["Setup Quality P&L", quality, "The average of your 1–10 setup, execution and discipline scores.", 10],
+            ["Strategy P&L", strategy, "By the setup each trade was tagged with.", 10],
+            ["Hourly P&L", hour, "Which Bursa hour pays you — the axis skips the 12:30–14:30 break.", 9.5, 0],
+            ["Holding Period P&L", holding, "Does letting a winner run, or cutting it fast, actually pay?", 9.5],
+            ["Position Size P&L", lots, "Board lots of 100 shares — the same size, every time?", 9.5],
+            ["Weekday P&L", weekday, "Which days of the week you give money back.", 10],
+            ["Setup Quality P&L", quality, "The average of your 1–10 setup, execution and discipline scores.", 9.5],
           ] as const).map(([title, data, hint, tickFontSize, tickInterval]) => (
-            <div className="card card-pad" key={title}>
-              <b>{title}</b>
-              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{hint}</div>
-              <PnlBars data={data} currency={currency} tickFontSize={tickFontSize} tickInterval={tickInterval} />
-            </div>
+            <Card key={title}>
+              <CardContent>
+                <b>{title}</b>
+                <div className="muted text-[11px] mt-0.5">{hint}</div>
+                <PnlBars data={data} currency={currency} tickFontSize={tickFontSize} tickInterval={tickInterval} />
+              </CardContent>
+            </Card>
           ))}
         </div>
 
         <div className="grid two">
-          <div className="card card-pad">
+          <Card>
+            <CardContent>
             <b>Equity Curve</b>
             <div style={{ height: 300, marginTop: 10 }}>
               <ResponsiveContainer>
@@ -220,21 +225,24 @@ export default function Analytics() {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-          </div>
-          <div className="card card-pad">
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent>
             <b>R Distribution</b>
             <div style={{ height: 300, marginTop: 10 }}>
               <ResponsiveContainer>
                 <BarChart data={rdist}>
                   <CartesianGrid {...gridProps} />
-                  <XAxis dataKey="range" tick={{ fill: CHART.axis, fontSize: 9 }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="range" tick={{ fill: CHART.axis, fontSize: 8.5 }} axisLine={false} tickLine={false} />
                   <YAxis allowDecimals={false} {...axisProps} />
                   <Tooltip {...tooltipProps} cursor={barCursor} />
                   <Bar dataKey="count" fill={CHART.accent} radius={[6, 6, 0, 0]} maxBarSize={46} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="grid two breakdown-grid">
@@ -268,17 +276,17 @@ function totals(name: string, rows: GroupRow[]): GroupRow {
 
 function Row({ r, currency, bold }: { r: GroupRow; currency?: string | null; bold?: boolean }) {
   return (
-    <tr className={bold ? "section-total" : r.trades ? undefined : "row-idle"}>
-      <td><b>{r.name}</b></td>
-      <td>{r.trades || "—"}</td>
-      <td>{r.trades ? `${r.winRate}%` : "—"}</td>
-      <td className={r.trades ? (r.avg >= 0 ? "positive" : "negative") : "muted"}>
+    <TableRow className={bold ? "section-total" : r.trades ? undefined : "row-idle"}>
+      <TableCell><b>{r.name}</b></TableCell>
+      <TableCell>{r.trades || "—"}</TableCell>
+      <TableCell>{r.trades ? `${r.winRate}%` : "—"}</TableCell>
+      <TableCell className={r.trades ? (r.avg >= 0 ? "positive" : "negative") : "muted"}>
         {r.trades ? formatMoney(r.avg, currency, true) : "—"}
-      </td>
-      <td className={r.trades ? (r.pnl >= 0 ? "positive" : "negative") : "muted"}>
+      </TableCell>
+      <TableCell className={r.trades ? (r.pnl >= 0 ? "positive" : "negative") : "muted"}>
         {r.trades ? formatMoney(r.pnl, currency, true) : "—"}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -301,25 +309,27 @@ function Breakdown({ title, rows, currency, sectionOf }: {
   const banded = new Set(sections.flatMap(s => s.rows.map(r => r.name)));
 
   return (
-    <div className="card card-pad">
-      <b>{title}</b>
-      {/* Five columns beside a chart, so the cells are set tighter than the journal's full-width table. */}
-      <div className="table-wrap table-compact" style={{ marginTop: 10 }}>
-        <table>
-          <thead><tr><th>Name</th><th>Trades</th><th>Win %</th><th>Avg</th><th>P&L</th></tr></thead>
-          <tbody>
+    <Card>
+      <CardContent>
+        <b>{title}</b>
+        {/* Five columns beside a chart, so the cells are set tighter than the journal's full-width table. */}
+        <Table wrapClassName="table-compact mt-2.5">
+          <TableHeader>
+            <TableRow><TableHead>Name</TableHead><TableHead>Trades</TableHead><TableHead>Win %</TableHead><TableHead>Avg</TableHead><TableHead>P&L</TableHead></TableRow>
+          </TableHeader>
+          <TableBody>
             {sections.map(s => (
               <Fragment key={s.label}>
-                <tr className="section-head"><td colSpan={5}>{s.label}</td></tr>
+                <TableRow className="section-head"><TableCell colSpan={5}>{s.label}</TableCell></TableRow>
                 {s.rows.map(r => <Row key={r.name} r={r} currency={currency} />)}
                 <Row r={totals(`${s.label.split(" · ")[0]} total`, s.rows)} currency={currency} bold />
               </Fragment>
             ))}
             {rows.filter(r => !banded.has(r.name)).map(r => <Row key={r.name} r={r} currency={currency} />)}
-            {!rows.length && <tr><td colSpan={5}><div className="empty">No data.</div></td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </div>
+            {!rows.length && <TableRow><TableCell colSpan={5}><div className="empty">No data.</div></TableCell></TableRow>}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   );
 }

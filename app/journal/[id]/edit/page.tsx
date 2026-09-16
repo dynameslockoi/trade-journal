@@ -1,10 +1,20 @@
 "use client";
+
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { BURSA_BOARD_LOT, SESSIONS, calculateGrossPnl, calculateRisk, formatMoney, formatR, localDatetimeToIso, numberOrNull, roundMoney, sessionBucket, sessionLabel, stripUnknownColumn, toLocalDatetimeInput } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
-import { Select } from "@/components/select";
+import { ConfirmButton } from "@/components/confirm-button";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DateTimePicker } from "@/components/ui/date-picker";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SELECT_NONE } from "@/components/ui/select";
 import { BROKER_PRESETS, DEFAULT_BROKER_ID, SHARES, brokerPreset, describeLeg, roundTripFees, type AssetClass, type FeeBreakdown } from "@/lib/fees";
 
 type Account = { id: string; name: string; broker?: string | null };
@@ -109,7 +119,6 @@ export default function EditTrade() {
   }
 
   async function removeScreenshot(shot: any) {
-    if (!confirm("Remove this screenshot?")) return;
     const s = createClient();
     const [storage, db] = await Promise.all([
       s.storage.from("trade-screenshots").remove([shot.storage_path]),
@@ -189,154 +198,226 @@ export default function EditTrade() {
     router.push(`/journal/${id}`);
   }
 
-  if (error && !form) return <div className="content"><div className="card card-pad error">{error}</div></div>;
+  if (error && !form) return <div className="content"><Alert variant="error" className="card">{error}</Alert></div>;
   if (!form) return <div className="content"><div className="muted">Loading trade…</div></div>;
 
   const profitClass = (v: number) => (v >= 0 ? "positive" : "negative");
 
   return (
-    <div className="content" style={{ maxWidth: 1100 }}>
+    <div className="content max-w-[1100px]">
       <PageHeader eyebrow="Journal / Edit Trade" title={`Edit ${form.symbol}`} subtitle="Charges and gross P&L recalculate as you change the figures." />
       <form onSubmit={save} className="grid">
-        <div className="card card-pad">
-          <h3>Trade Details</h3>
-          <div className="grid three">
-            <label className="field">Symbol<input className="input" required value={form.symbol || ""} onChange={e => set("symbol", e.target.value.toUpperCase())} /></label>
-            {[["entry_price", "Entry Price"], ["exit_price", "Exit Price"], ["position_size", "Position Size (shares)"], ["stop_loss", "Stop Loss"], ["take_profit", "Take Profit"]].map(([k, l]) => (
-              <label className="field" key={k}>{l}<input className="input" type="number" step="any" value={form[k] ?? ""} onChange={e => set(k, e.target.value)} /></label>
-            ))}
-            <label className="field">Board Lots ×{BURSA_BOARD_LOT}<input className="input" type="number" step="any" min="0" value={lots} onChange={e => updateLots(e.target.value)} placeholder="optional helper" /></label>
-            <label className="field">Entry Date/Time<input className="input" type="datetime-local" required value={form.entry_at || ""} onChange={e => set("entry_at", e.target.value)} /></label>
-            <label className="field">Exit Date/Time<input className="input" type="datetime-local" value={form.exit_at || ""} onChange={e => set("exit_at", e.target.value)} /></label>
-            <div className="field">
-              <span>Account</span>
-              <Select aria-label="Account" value={form.account_id || ""} onChange={pickAccount}>
-                <option value="">No account</option>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </Select>
-            </div>
-            <div className="field">
-              <span>Strategy</span>
-              <Select aria-label="Strategy" value={form.strategy_id || ""} onChange={v => set("strategy_id", v)}>
-                <option value="">No strategy</option>
-                {strategies.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </Select>
-            </div>
-          </div>
-          <label className="field review-label" style={{ marginTop: 12 }}>
-            <input type="checkbox" checked={!!form.is_ipo} onChange={e => set("is_ipo", e.target.checked)} />
-            IPO allocation <span className="muted">— bought through an IPO allotment, not the open market</span>
-          </label>
-          <div className="calc-strip">
-            <span className="muted">Contract {money(entryValue)} → {money(exitValue)} · Bursa board lot is {BURSA_BOARD_LOT} shares</span>
-          </div>
-        </div>
-
-        <div className="card card-pad">
-          <h3>Fees &amp; Charges</h3>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <div className="field" style={{ flex: "1 1 240px" }}>
-              <span>Broker preset</span>
-              <Select aria-label="Broker preset" value={broker} onChange={setBroker}>
-                {BROKER_PRESETS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </Select>
-            </div>
-            <label className="field" style={{ flex: "0 1 110px" }}>
-              SST %
-              <input className="input" type="number" step="0.1" min="0" placeholder="auto" value={sstOverride} onChange={e => setSstOverride(e.target.value)} />
-            </label>
-            {preset.brokerage.intradayRate !== null && (
-              <label className="field review-label" style={{ flex: "0 0 auto" }}>
-                <input type="checkbox" checked={intraday} onChange={e => setIntraday(e.target.checked)} /> Intraday
-              </label>
-            )}
-            <label className="field review-label" style={{ flex: "0 0 auto" }}>
-              <input type="checkbox" checked={autoCalc} onChange={e => setAutoCalc(e.target.checked)} /> Auto-calculate
-            </label>
-          </div>
-          <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-            {preset.note}. Bursa shares — stamp duty is RM1 per RM1,000, capped at RM1,000.
-          </div>
-
-          <div className="fee-panel">
-            <div className="fee-row"><span className="muted">Opening contract {money(entryValue)}</span><span>{describeLeg(fees.open, formatMoney)}</span></div>
-            <div className="fee-row"><span className="muted">Closing contract {money(exitValue)}</span><span>{describeLeg(fees.close, formatMoney)}</span></div>
-            <div className="fee-row fee-total"><span>Total charges</span><span>{money(fees.total)}</span></div>
-          </div>
-
-          <div className="grid three" style={{ gap: 12, marginTop: 14 }}>
-            <label className="field">
-              Gross P&amp;L
-              <input className="input" type="number" step="any" readOnly={autoCalc} value={autoCalc ? String(grossPnl) : form.gross_pnl ?? ""} onChange={e => set("gross_pnl", e.target.value)} />
-            </label>
-            <label className="field">
-              Commission (brokerage + platform + SST)
-              <input className="input" type="number" step="any" readOnly={autoCalc} value={autoCalc ? String(commission) : form.commission ?? ""} onChange={e => set("commission", e.target.value)} />
-            </label>
-            <label className="field">
-              Exchange fees (clearing + stamp duty)
-              <input className="input" type="number" step="any" readOnly={autoCalc} value={autoCalc ? String(exchangeFees) : form.fees ?? ""} onChange={e => set("fees", e.target.value)} />
-            </label>
-          </div>
-          <div className="grid three" style={{ gap: 12 }}>
-            {Number(form.swap || 0) !== 0 && <label className="field">Swap / overnight<input className="input" type="number" step="any" value={form.swap ?? ""} onChange={e => set("swap", e.target.value)} /></label>}
-            <label className="field">Risk Amount<input className="input" type="number" step="any" value={form.risk_amount ?? ""} onChange={e => set("risk_amount", e.target.value)} /></label>
-            <label className="field">Risk %<input className="input" type="number" step="any" value={form.risk_percent ?? ""} onChange={e => set("risk_percent", e.target.value)} /></label>
-          </div>
-          <div className="calc-strip">
-            <span>Risk: <b>{formatMoney(risk)}</b></span>
-            <span>Gross: <b className={profitClass(grossPnl)}>{formatMoney(grossPnl, null, true)}</b></span>
-            <span>Net after charges: <b className={profitClass(netPnl)}>{formatMoney(netPnl, null, true)}</b></span>
-            <span>R (net): <b className={rNet === null ? "" : profitClass(rNet)}>{rNet === null ? "—" : formatR(rNet)}</b></span>
-            <span>R (gross): <b className={rGross === null ? "" : profitClass(rGross)}>{rGross === null ? "—" : formatR(rGross)}</b></span>
-          </div>
-        </div>
-
-        <div className="card card-pad">
-          <h3>Psychology &amp; Execution</h3>
-          <div className="grid three">
-            {Object.entries(psychology).map(([key, opts]) => (
-              <div className="field" key={key}>
-                <span>{key.replaceAll("_", " ")}</span>
-                <Select aria-label={key.replaceAll("_", " ")} value={form[key] || ""} onChange={v => set(key, v)}>
-                  <option value="">Not set</option>
-                  {(key === "session" ? SESSIONS : opts).map(x => <option key={x} value={x}>{sessionLabel(x)}</option>)}
+        <Card>
+          <CardHeader><CardTitle>Trade Details</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid three">
+              <div className="form-field">
+                <Label htmlFor="et-symbol">Symbol</Label>
+                <Input id="et-symbol" required value={form.symbol || ""} onChange={e => set("symbol", e.target.value.toUpperCase())} />
+              </div>
+              {([["entry_price", "Entry Price"], ["exit_price", "Exit Price"], ["position_size", "Position Size (shares)"], ["stop_loss", "Stop Loss"], ["take_profit", "Take Profit"]] as const).map(([k, l]) => (
+                <div className="form-field" key={k}>
+                  <Label htmlFor={`et-${k}`}>{l}</Label>
+                  <Input id={`et-${k}`} type="number" step="any" value={form[k] ?? ""} onChange={e => set(k, e.target.value)} />
+                </div>
+              ))}
+              <div className="form-field">
+                <Label htmlFor="et-lots">Board Lots ×{BURSA_BOARD_LOT}</Label>
+                <Input id="et-lots" type="number" step="any" min="0" value={lots} onChange={e => updateLots(e.target.value)} placeholder="optional helper" />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="et-entry">Entry Date/Time</Label>
+                <DateTimePicker id="et-entry" value={form.entry_at || ""} onChange={v => set("entry_at", v)} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="et-exit">Exit Date/Time</Label>
+                <DateTimePicker id="et-exit" value={form.exit_at || ""} onChange={v => set("exit_at", v)} placeholder="Still open" />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="et-account">Account</Label>
+                <Select value={form.account_id || SELECT_NONE} onValueChange={v => pickAccount(v === SELECT_NONE ? "" : v)}>
+                  <SelectTrigger id="et-account"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SELECT_NONE}>No account</SelectItem>
+                    {accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                  </SelectContent>
                 </Select>
               </div>
-            ))}
-            {["setup_quality", "execution_quality", "discipline"].map(k => (
-              <label className="field" key={k}>{k.replaceAll("_", " ")}<input className="input" type="number" min="1" max="10" value={form[k] ?? ""} onChange={e => set(k, e.target.value)} /></label>
-            ))}
-            <label className="field">MAE<input className="input" type="number" step="any" value={form.mae ?? ""} onChange={e => set("mae", e.target.value)} /></label>
-            <label className="field">MFE<input className="input" type="number" step="any" value={form.mfe ?? ""} onChange={e => set("mfe", e.target.value)} /></label>
-          </div>
-          <label className="field">Notes<textarea className="input" rows={7} value={form.notes || ""} onChange={e => set("notes", e.target.value)} /></label>
-        </div>
+              <div className="form-field">
+                <Label htmlFor="et-strategy">Strategy</Label>
+                <Select value={form.strategy_id || SELECT_NONE} onValueChange={v => set("strategy_id", v === SELECT_NONE ? "" : v)}>
+                  <SelectTrigger id="et-strategy"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SELECT_NONE}>No strategy</SelectItem>
+                    {strategies.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="review-label mt-3">
+              <Checkbox id="et-ipo" checked={!!form.is_ipo} onCheckedChange={v => set("is_ipo", !!v)} />
+              <Label htmlFor="et-ipo">IPO allocation <span className="muted">— bought through an IPO allotment, not the open market</span></Label>
+            </div>
+            <div className="calc-strip">
+              <span className="muted">Contract {money(entryValue)} → {money(exitValue)} · Bursa board lot is {BURSA_BOARD_LOT} shares</span>
+            </div>
+          </CardContent>
+        </Card>
 
-        <div className="card card-pad">
-          <h3>Tags</h3>
-          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-            {tags.map(t => (
-              <button type="button" key={t.id} className={`btn ${selectedTags.includes(t.id) ? "btn-primary" : ""}`} onClick={() => setSelectedTags(x => x.includes(t.id) ? x.filter(y => y !== t.id) : [...x, t.id])}>{t.name}</button>
-            ))}
-            {!tags.length && <span className="muted">No tags created yet.</span>}
-          </div>
-        </div>
+        <Card>
+          <CardHeader><CardTitle>Fees &amp; Charges</CardTitle></CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="form-field flex-[1_1_240px]">
+                <Label htmlFor="et-broker">Broker preset</Label>
+                <Select value={broker} onValueChange={setBroker}>
+                  <SelectTrigger id="et-broker"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {BROKER_PRESETS.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="form-field flex-[0_1_110px]">
+                <Label htmlFor="et-sst">SST %</Label>
+                <Input id="et-sst" type="number" step="0.1" min="0" placeholder="auto" value={sstOverride} onChange={e => setSstOverride(e.target.value)} />
+              </div>
+              {preset.brokerage.intradayRate !== null && (
+                <div className="review-label">
+                  <Checkbox id="et-intraday" checked={intraday} onCheckedChange={v => setIntraday(!!v)} />
+                  <Label htmlFor="et-intraday">Intraday</Label>
+                </div>
+              )}
+              <div className="review-label">
+                <Checkbox id="et-auto" checked={autoCalc} onCheckedChange={v => setAutoCalc(!!v)} />
+                <Label htmlFor="et-auto">Auto-calculate</Label>
+              </div>
+            </div>
+            <div className="muted text-[10px] mt-2">
+              {preset.note}. Bursa shares — stamp duty is RM1 per RM1,000, capped at RM1,000.
+            </div>
 
-        <div className="card card-pad">
-          <h3>Screenshots</h3>
-          {shots.length ? <div className="shot-grid">{shots.map(shot => <ScreenshotItem key={shot.id} shot={shot} onDelete={removeScreenshot} />)}</div> : <div className="muted">No screenshots attached.</div>}
-          <label className="upload-box" style={{ display: "block", cursor: "pointer" }}>
-            Add screenshots
-            <input hidden type="file" accept="image/*" multiple onChange={e => setFiles(Array.from(e.target.files ?? []))} />
-            {files.length > 0 && <div style={{ marginTop: 8, color: "var(--text)" }}>{files.length} new image(s) selected · max 10 MB each</div>}
-          </label>
-        </div>
+            <div className="fee-panel">
+              <div className="fee-row"><span className="muted">Opening contract {money(entryValue)}</span><span>{describeLeg(fees.open, formatMoney)}</span></div>
+              <div className="fee-row"><span className="muted">Closing contract {money(exitValue)}</span><span>{describeLeg(fees.close, formatMoney)}</span></div>
+              <div className="fee-row fee-total"><span>Total charges</span><span>{money(fees.total)}</span></div>
+            </div>
 
-        {error && <div className="error">{error}</div>}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" className="btn" onClick={() => router.back()}>Cancel</button>
-          <button className="btn btn-primary" disabled={saving}>{saving ? "Saving…" : "Save Changes"}</button>
+            <div className="grid three gap-3 mt-3.5">
+              <div className="form-field">
+                <Label htmlFor="et-gross">Gross P&amp;L</Label>
+                <Input id="et-gross" type="number" step="any" readOnly={autoCalc} value={autoCalc ? String(grossPnl) : form.gross_pnl ?? ""} onChange={e => set("gross_pnl", e.target.value)} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="et-commission">Commission (brokerage + platform + SST)</Label>
+                <Input id="et-commission" type="number" step="any" readOnly={autoCalc} value={autoCalc ? String(commission) : form.commission ?? ""} onChange={e => set("commission", e.target.value)} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="et-fees">Exchange fees (clearing + stamp duty)</Label>
+                <Input id="et-fees" type="number" step="any" readOnly={autoCalc} value={autoCalc ? String(exchangeFees) : form.fees ?? ""} onChange={e => set("fees", e.target.value)} />
+              </div>
+            </div>
+            <div className="grid three gap-3">
+              {Number(form.swap || 0) !== 0 && (
+                <div className="form-field">
+                  <Label htmlFor="et-swap">Swap / overnight</Label>
+                  <Input id="et-swap" type="number" step="any" value={form.swap ?? ""} onChange={e => set("swap", e.target.value)} />
+                </div>
+              )}
+              <div className="form-field">
+                <Label htmlFor="et-risk">Risk Amount</Label>
+                <Input id="et-risk" type="number" step="any" value={form.risk_amount ?? ""} onChange={e => set("risk_amount", e.target.value)} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="et-riskpct">Risk %</Label>
+                <Input id="et-riskpct" type="number" step="any" value={form.risk_percent ?? ""} onChange={e => set("risk_percent", e.target.value)} />
+              </div>
+            </div>
+            <div className="calc-strip">
+              <span>Risk: <b>{formatMoney(risk)}</b></span>
+              <span>Gross: <b className={profitClass(grossPnl)}>{formatMoney(grossPnl, null, true)}</b></span>
+              <span>Net after charges: <b className={profitClass(netPnl)}>{formatMoney(netPnl, null, true)}</b></span>
+              <span>R (net): <b className={rNet === null ? "" : profitClass(rNet)}>{rNet === null ? "—" : formatR(rNet)}</b></span>
+              <span>R (gross): <b className={rGross === null ? "" : profitClass(rGross)}>{rGross === null ? "—" : formatR(rGross)}</b></span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Psychology &amp; Execution</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid three">
+              {Object.entries(psychology).map(([key, opts]) => (
+                <div className="form-field" key={key}>
+                  <Label htmlFor={`et-${key}`}>{key.replaceAll("_", " ")}</Label>
+                  <Select value={form[key] || SELECT_NONE} onValueChange={v => set(key, v === SELECT_NONE ? "" : v)}>
+                    <SelectTrigger id={`et-${key}`}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SELECT_NONE}>Not set</SelectItem>
+                      {(key === "session" ? SESSIONS : opts).map(x => <SelectItem key={x} value={x}>{sessionLabel(x)}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+              {(["setup_quality", "execution_quality", "discipline"] as const).map(k => (
+                <div className="form-field" key={k}>
+                  <Label htmlFor={`et-${k}`}>{k.replaceAll("_", " ")}</Label>
+                  <Input id={`et-${k}`} type="number" min="1" max="10" value={form[k] ?? ""} onChange={e => set(k, e.target.value)} />
+                </div>
+              ))}
+              <div className="form-field">
+                <Label htmlFor="et-mae">MAE</Label>
+                <Input id="et-mae" type="number" step="any" value={form.mae ?? ""} onChange={e => set("mae", e.target.value)} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="et-mfe">MFE</Label>
+                <Input id="et-mfe" type="number" step="any" value={form.mfe ?? ""} onChange={e => set("mfe", e.target.value)} />
+              </div>
+            </div>
+            <div className="form-field mt-3.5">
+              <Label htmlFor="et-notes">Notes</Label>
+              <Textarea id="et-notes" rows={7} value={form.notes || ""} onChange={e => set("notes", e.target.value)} />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Tags</CardTitle></CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {tags.map(t => (
+                <Button
+                  type="button"
+                  key={t.id}
+                  size="sm"
+                  variant={selectedTags.includes(t.id) ? "default" : "secondary"}
+                  onClick={() => setSelectedTags(x => x.includes(t.id) ? x.filter(y => y !== t.id) : [...x, t.id])}
+                >
+                  {t.name}
+                </Button>
+              ))}
+              {!tags.length && <span className="muted">No tags created yet.</span>}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Screenshots</CardTitle></CardHeader>
+          <CardContent>
+            {shots.length ? (
+              <div className="shot-grid">{shots.map(shot => <ScreenshotItem key={shot.id} shot={shot} onDelete={removeScreenshot} />)}</div>
+            ) : <div className="muted">No screenshots attached.</div>}
+            <label className="upload-box block cursor-pointer">
+              Add screenshots
+              <input hidden type="file" accept="image/*" multiple onChange={e => setFiles(Array.from(e.target.files ?? []))} />
+              {files.length > 0 && <div className="mt-2 text-[var(--text)]">{files.length} new image(s) selected · max 10 MB each</div>}
+            </label>
+          </CardContent>
+        </Card>
+
+        {error && <Alert variant="error">{error}</Alert>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={() => router.back()}>Cancel</Button>
+          <Button disabled={saving}>{saving ? "Saving…" : "Save Changes"}</Button>
         </div>
       </form>
     </div>
@@ -348,8 +429,17 @@ function ScreenshotItem({ shot, onDelete }: { shot: any; onDelete: (shot: any) =
   useEffect(() => { createClient().storage.from("trade-screenshots").createSignedUrl(shot.storage_path, 3600).then(({ data }) => setUri(data?.signedUrl ?? "")); }, [shot.storage_path]);
   return (
     <div className="screenshot-wrap">
-      {uri ? <img src={uri} alt={shot.caption || "Trade screenshot"} style={{ width: "100%", borderRadius: 10, border: "1px solid var(--border)" }} /> : <div className="muted">Loading image…</div>}
-      <button type="button" className="btn screenshot-delete danger-btn" onClick={() => onDelete(shot)}>Remove</button>
+      {uri ? <img src={uri} alt={shot.caption || "Trade screenshot"} className="w-full rounded-[10px] border border-[var(--border)]" /> : <div className="muted">Loading image…</div>}
+      <ConfirmButton
+        size="sm"
+        className="screenshot-delete"
+        title="Remove this screenshot?"
+        description="The image is deleted from storage as well as from this trade."
+        confirmLabel="Remove"
+        onConfirm={() => onDelete(shot)}
+      >
+        Remove
+      </ConfirmButton>
     </div>
   );
 }
