@@ -66,6 +66,9 @@ export type AdminOverview = { stats: AdminStats; users: AdminUser[]; invites: Ad
 
 export type AdminResult = { ok: boolean; reason?: string; code?: string };
 
+/** What `admin_create_user` answers: the new account, or the sentence explaining the refusal. */
+export type CreatedUser = { ok: boolean; reason?: string; id?: string; email?: string; access_until?: string | null };
+
 /**
  * True when the answer is "that function does not exist" rather than a real failure — the marker that
  * `supabase/admin.sql` still has to be run. PostgREST answers PGRST202 and, on a cold schema cache,
@@ -154,6 +157,37 @@ export async function adminCreateInvite(input: {
   return (data as AdminResult) ?? { ok: false, reason: "The code was not created." };
 }
 
+/**
+ * Create an account that is already confirmed, with an end date set as it is made.
+ *
+ * The invitation gate is on the *signup* path, and this is not that path: an administrator creating an
+ * account is the invitation. `supabase/create-user.sql` is what makes it possible — it writes the user
+ * through GoTrue's own `auth` tables with `email_confirmed_at` filled in, so no confirmation mail is
+ * sent and none is needed even though "Confirm email" stays on for everybody signing up themselves.
+ */
+export async function adminCreateUser(input: {
+  email: string;
+  password: string;
+  name: string;
+  accessUntil: string | null;
+  note: string | null;
+}): Promise<CreatedUser> {
+  const { data, error } = await createClient().rpc("admin_create_user", {
+    new_email: input.email.trim(),
+    new_password: input.password,
+    new_name: input.name.trim() || null,
+    new_access_until: input.accessUntil,
+    new_note: input.note?.trim() || null,
+  });
+  if (error) throw failed(error.message);
+  return (data as CreatedUser) ?? { ok: false, reason: "The account was not created." };
+}
+
+/** What to do when `create-user.sql` has not been run. */
+export const CREATE_USER_HINT =
+  "Creating accounts needs one more file. Run supabase/create-user.sql in the Supabase SQL editor, then try again.";
+
+/** Where the Admin page's invitation dialog writes. */
 export async function adminSetInvite(input: {
   code: string;
   disabled?: boolean;

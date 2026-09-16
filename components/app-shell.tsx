@@ -4,10 +4,11 @@ import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { KEYS, warmData } from "@/lib/data";
 import { loadMe, type Me } from "@/lib/admin";
-import { accessState } from "@/lib/access";
+import { accessState, expiryNotice } from "@/lib/access";
 import { useCachedQuery } from "@/lib/query-cache";
-import { toISODate, today as todayInMalaysia } from "@/lib/dates";
+import { dateLabel, toISODate, today as todayInMalaysia } from "@/lib/dates";
 import { AccessDenied } from "@/components/access-denied";
+import { AccessExpiry } from "@/components/access-expiry";
 import { QuickAdd } from "@/components/quick-add";
 import { MobileNav, Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
@@ -31,7 +32,15 @@ export function AppShell({ email, name, children }: { email: string; name?: stri
    * journal over a missing migration would be worse than letting a suspended account reload once.
    */
   const me = useCachedQuery<Me | null>(KEYS.me, loadMe, { enabled: !standalone && Boolean(email) });
-  const access = accessState(me.data, toISODate(todayInMalaysia()));
+  const today = toISODate(todayInMalaysia());
+  const access = accessState(me.data, today);
+  /**
+   * The countdown a customer sees before their access ends. `scheduled` — anything more than a
+   * fortnight away — renders nothing, so a year-long account carries no banner; the settings page is
+   * where that date lives. It reaches the customer through the same cached `me` read as the gate, so
+   * it costs no request of its own.
+   */
+  const notice = expiryNotice(me.data, today, { formatDate: dateLabel });
   const isAdmin = Boolean(me.data?.is_admin);
 
   /**
@@ -57,13 +66,14 @@ export function AppShell({ email, name, children }: { email: string; name?: stri
   }, [standalone]);
 
   if (standalone) return <>{children}</>;
-  if (!access.ok) return <AccessDenied state={access} email={email} />;
+  if (!access.ok) return <AccessDenied state={access} notice={notice} email={email} />;
   return (
     <TooltipProvider delayDuration={300}>
       <div className="shell">
         <Sidebar isAdmin={isAdmin} />
         <main className="main">
           <Topbar email={email} name={name} />
+          <AccessExpiry notice={notice} />
           {children}
           <QuickAdd />
         </main>

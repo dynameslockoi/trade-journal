@@ -7,11 +7,14 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:fees && npm run test:calc && npm run test:access && npm run test:sql",
+    "test": "npm run test:fees && npm run test:calc && npm run test:access && npm run test:demo && npm run test:sql",
     "test:fees": "node scripts/fee-check.mts",
     "test:calc": "node scripts/calc-check.mts",
     "test:access": "node scripts/admin-check.mts",
-    "test:sql": "node scripts/sql-check.mjs"
+    "test:demo": "node scripts/demo-check.mts",
+    "test:sql": "node scripts/sql-check.mjs",
+    "demo:seed": "node --env-file-if-exists=.env scripts/demo-data.mts seed",
+    "demo:clear": "node --env-file-if-exists=.env scripts/demo-data.mts clear"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",

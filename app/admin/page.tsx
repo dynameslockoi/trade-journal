@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Ban, CheckCircle2, Copy, RefreshCw, Ticket } from "lucide-react";
+import { Ban, CheckCircle2, Copy, RefreshCw, Ticket, UserPlus } from "lucide-react";
 import { KEYS } from "@/lib/data";
 import { invalidate, useCachedQuery } from "@/lib/query-cache";
 import {
+  CREATE_USER_HINT,
   SCHEMA_HINT,
   adminCreateInvite,
+  adminCreateUser,
   adminSetInvite,
   adminSetUser,
   isMissingSchema,
@@ -16,14 +18,16 @@ import {
   type AdminInvite,
   type AdminOverview,
   type AdminUser,
+  type CreatedUser,
   type Me,
 } from "@/lib/admin";
-import { accessState, daysLeft, inviteState, suggestInviteCode } from "@/lib/access";
+import { accessState, daysLeft, inviteState, suggestInviteCode, suggestPassword } from "@/lib/access";
 import { dateLabel, toISODate, today as todayInMalaysia } from "@/lib/dates";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { LoadError } from "@/components/load-error";
 import { ConfirmButton } from "@/components/confirm-button";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -62,6 +66,7 @@ export default function AdminPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [editing, setEditing] = useState<AdminUser | null>(null);
+  const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState("");
 
   const error = meQ.error ?? overview.error;
@@ -203,6 +208,11 @@ export default function AdminPage() {
               </div>
             </div>
             <div className="admin-toolbar">
+              {/* The other way an account comes into being: no code, no confirmation mail. */}
+              <Button type="button" onClick={() => setCreating(true)}>
+                <UserPlus size={14} />
+                New account
+              </Button>
               <Input
                 className="admin-search"
                 placeholder="Search name, email or code"
@@ -340,7 +350,167 @@ export default function AdminPage() {
           onSave={(status, accessUntil, note) => setAccess(editing, status, accessUntil, note)}
         />
       )}
+
+      {creating && <CreateAccountDialog onClose={() => setCreating(false)} onCreated={refresh} />}
     </div>
+  );
+}
+
+/**
+ * Create an account by hand — an onboarding, or a test login with an address nobody can confirm.
+ *
+ * The invitation gate is the signup path, and this deliberately is not that path: the administrator
+ * *is* the invitation. `admin_create_user()` writes the account straight into GoTrue's tables with its
+ * confirmation date already set, which is what lets an account work the moment it exists while
+ * "Confirm email" stays on for everybody who signs themselves up.
+ *
+ * The credentials are shown rather than hidden, because the whole point is to hand them to somebody:
+ * an account nobody can sign into is not an account.
+ */
+function CreateAccountDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [until, setUntil] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  /** Set once the account exists, so the dialog can hand over the details instead of closing. */
+  const [made, setMade] = useState<CreatedUser | null>(null);
+
+  function generate() {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    setPassword(suggestPassword(bytes));
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const result = await adminCreateUser({ email, password, name, accessUntil: until || null, note });
+      if (!result.ok) {
+        setError(result.reason ?? "The account was not created.");
+        return;
+      }
+      setMade(result);
+      onCreated();
+      toast.success(`${result.email ?? email} created`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(isMissingSchema(message) ? CREATE_USER_HINT : message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy(text: string, what: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${what} copied`);
+    } catch {
+      toast.error("The browser refused to copy.");
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={next => (next ? undefined : onClose())}>
+      <DialogContent className="dialog-wide" aria-describedby={undefined}>
+        <DialogTitle>{made ? "Account created" : "New account"}</DialogTitle>
+        <p className="muted text-[11.5px] mt-1 mb-4">
+          {made
+            ? "No email was sent and none is needed — the address is already confirmed."
+            : "For a customer you are onboarding by hand, or a test login. No invitation code and no email confirmation is involved."}
+        </p>
+
+        {made ? (
+          <div className="grid gap-3">
+            {[
+              ["Email", made.email ?? email],
+              ["Password", password],
+            ].map(([label, value]) => (
+              <div className="form-field" key={label}>
+                <Label>{label}</Label>
+                <div className="admin-credential">
+                  <code>{value}</code>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => copy(value, label)}>
+                    <Copy size={13} />
+                    Copy
+                  </Button>
+                </div>
+              </div>
+            ))}
+            <div className="muted text-[11px]">
+              {made.access_until
+                ? `Access is set to end on ${dateLabel(made.access_until)} — change it any time from Change → Access.`
+                : "Access is open-ended. Give it an end date from Change → Access whenever the term is agreed."}
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={submit} className="grid gap-3">
+            <div className="grid two">
+              <div className="form-field">
+                <Label htmlFor="cu-email">Email</Label>
+                <Input id="cu-email" type="email" required value={email} onChange={e => setEmail(e.target.value)} />
+              </div>
+              <div className="form-field">
+                <Label htmlFor="cu-name">Display name</Label>
+                <Input id="cu-name" value={name} onChange={e => setName(e.target.value)} placeholder="Optional" />
+              </div>
+            </div>
+            <div className="form-field">
+              <Label htmlFor="cu-password">Password</Label>
+              <div className="admin-credential">
+                <Input
+                  id="cu-password"
+                  required
+                  minLength={8}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  autoComplete="new-password"
+                />
+                <Button type="button" variant="secondary" onClick={generate}>
+                  Generate
+                </Button>
+              </div>
+              <div className="muted text-[10.5px] mt-1">
+                Shown as you type, because you are about to hand it over. The account holder can change it on
+                the Settings page.
+              </div>
+            </div>
+            <div className="grid two">
+              <div className="form-field">
+                <Label htmlFor="cu-until">Access ends</Label>
+                <DatePicker id="cu-until" value={until} onChange={setUntil} placeholder="No end date" />
+                <div className="muted text-[10.5px] mt-1">
+                  Set the term now if it is already agreed. A date in the past locks the account out on its
+                  own, and the customer is warned in the app for the last fortnight.
+                </div>
+              </div>
+              <div className="form-field">
+                <Label htmlFor="cu-note">Note</Label>
+                <Input id="cu-note" value={note} onChange={e => setNote(e.target.value)} placeholder="Who this is, or why it exists" />
+              </div>
+            </div>
+            {error && <Alert variant="error">{error}</Alert>}
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={onClose} disabled={busy}>
+                Cancel
+              </Button>
+              <Button disabled={busy}>{busy ? "Creating…" : "Create account"}</Button>
+            </DialogFooter>
+          </form>
+        )}
+
+        {made && (
+          <DialogFooter>
+            <Button onClick={onClose}>Done</Button>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

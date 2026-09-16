@@ -189,6 +189,25 @@ sidebar link only exists for an admin, and the page refuses everyone else.
   going further; the accounts it already created keep pointing at it.
 - **Nothing gets deleted.** A suspension is reversible from this page, and an account's data is untouched
   while it is locked.
+- **Create an account by hand.** *New account* makes one that is already confirmed, so it works the
+  moment it exists with no email round trip: the case of a test or demo login on an address nobody can
+  check, or a customer you are onboarding yourself. The password is shown so it can be handed over (there
+  is a generator for one), and the end date is set as the account is made. The invitation gate is not
+  weakened by this: the exemption applies only when the caller is an administrator, which the SQL tests
+  send as a request from a customer and from an anonymous context to prove.
+- **What "writing GoTrue's tables directly" actually costs.** GoTrue fills several of its columns in code
+  rather than in a schema default, and it reads them back into values that cannot hold NULL — so a
+  hand-written account has to supply them itself, or it fails in a way that looks like anything but a
+  database problem: the account exists, the password is right, and sign-in answers *invalid credentials*
+  because the lookup that matches an email goes through columns that are NULL (audience, role, instance),
+  or *500 Database error querying schema* when the row is found and cannot be read (the timestamps and
+  token strings). `create-user.sql` fills all of them, repairs accounts left stranded by its own earlier
+  version, and ends with a query that lists any account still in that state — expect it to return no rows.
+- **The customer is told, rather than surprised.** Once a fortnight is left on an end date, an amber
+  countdown band sits above every page and can be dismissed for the session. The date itself always lives
+  on the Settings page, so an account with a year to run is never nagged about it — and the blocked screen
+  names the date the same way the rest of the app writes one ("8 Sept 2025") rather than the raw ISO
+  string the gate carries internally.
 
 A suspended or expired account does not merely get a warning: the shell renders a full stop instead of the
 journal, and the sign-in page refuses the account too. The check costs nothing on a navigation; it is one
@@ -259,7 +278,7 @@ opened at 00:30 on 1 September is a September trade rather than an August one.
 
 ### 2. Create the database
 
-In your Supabase project, open the **SQL editor** and run these six files from `supabase/`, **in this
+In your Supabase project, open the **SQL editor** and run these seven files from `supabase/`, **in this
 order**. Each one is written to be re-runnable, so a second run is harmless:
 
 | File | What it creates |
@@ -269,22 +288,25 @@ order**. Each one is written to be re-runnable, so a second run is harmless:
 | `supabase/sectors.sql` | `trades.sector` and its index, for the sector column, filter, charts and the sentiment strip. |
 | `supabase/cashflow.sql` | `account_cash_flows` — one row per deposit or withdrawal — and seeds each account's existing opening balance as its first deposit. |
 | `supabase/admin.sql` | Invitation-only signup (`invite_codes` plus the trigger that enforces it), the access columns on `profiles` (`is_admin`, `status`, `access_until`, `note`, `invite_code`), the admin-only functions the Admin page calls, and a guard that stops a signed-in account writing those columns to its own row. |
-| `supabase/access.sql` | **Run this last.** Adds `is_active()` and puts it into every policy that hands out a row — tables *and* the screenshot bucket — so a suspended or expired account is refused by Postgres, not only by the app. |
+| `supabase/access.sql` | Adds `is_active()` and puts it into every policy that hands out a row — tables *and* the screenshot bucket — so a suspended or expired account is refused by Postgres, not only by the app. Run it after `admin.sql`. |
+| `supabase/create-user.sql` | **Run this last.** Adds `admin_create_user()`, which lets the Admin page create an account that is already confirmed — for a test login on an address nobody can check, or a customer you are onboarding by hand — and with its end date set as it is made. Also teaches the signup trigger the one exemption that makes it possible, without opening the invitation gate to anybody else. |
 
-Two notes on `admin.sql`, both easy to miss:
+Two notes on `admin.sql` and `create-user.sql`, both easy to miss:
 
 - **Promote yourself.** The file ends with a single commented `update` that gives your own account the
   admin flag. Replace the placeholder address and run that one statement, or the Admin page will tell you
   it is not set up. On a brand-new install the first account is promoted automatically, but a database
   that already has profiles needs the statement.
-- **Run it again if you re-run `schema.sql`.** That file recreates the new-user trigger without the code
+- **Run `admin.sql` and `create-user.sql` again if you re-run `schema.sql`.** That file recreates the new-user trigger without the code
   check, which would quietly reopen signups. `schema.sql` also recreates the per-user policies without
   the access clause, so re-run `access.sql` after it for the same reason.
 
 Nothing in the app depends on a service-role key; the browser talks to Postgres with the anon key and is
 constrained by RLS. The admin reads and writes go through `security definer` functions that check
 `is_admin()` first, so a customer's browser can no more read another account than it can read another
-journal.
+journal. That includes creating an account: `admin_create_user()` writes the user into GoTrue's own
+tables with its confirmation date already set, which is how the Admin page can hand somebody a working
+login while "Confirm email" stays on for everybody signing up themselves.
 
 ### 3. Point Supabase Auth at your app
 
@@ -316,8 +338,8 @@ npm install
 npm run dev          # http://localhost:3000
 ```
 
-Open the app, **create an account**, confirm the email, sign in — and log your first trade. There is no
-seed data: the journal is empty until you use it.
+Open the app, **create an account**, confirm the email, sign in — and log your first trade. The journal
+starts empty unless you ask for the demo journal in step 7.
 
 With `admin.sql` in place you cannot create that first account until a code exists, so **create your own
 code first**, in the SQL editor:
@@ -333,14 +355,43 @@ the sidebar.
 
 ```bash
 npm run typecheck    # tsc --noEmit, 0 errors expected
-npm test             # fee model, calculations, access rules, and the SQL run for real
+npm test             # fee model, calculations, access rules, the demo journal, and the SQL run for real
 ```
 
 Then, in the app: add an account with an opening balance, record a trade, and check that the Accounts page
 shows it under *Movements*. If a page reports a missing column, one of the five SQL files above has not
 been run yet — the app degrades instead of breaking, and says which script it wants.
 
-### 7. Deploy
+### 7. Optional: a demo account
+
+If you want to show the journal to somebody — a buyer, a friend, a support call — give it an account of
+its own and fill it with a generated Bursa journal:
+
+1. On the **Admin page**, press **New account** and fill it in: an address (it does not have to exist —
+   nothing is emailed to it), the password you want to hand over, and an end date if the demo should
+   expire on its own. The dialog shows the credentials when it is done so you can copy them out.
+2. Write the journal into that account:
+
+```bash
+DEMO_PASSWORD='the password you just set' npm run demo:seed
+```
+
+That creates two demo broker accounts with deposits and withdrawals, ~60 long-only Bursa trades with real
+M+/Moomoo charges, strategies, tags, and a fortnight of daily reviews. Sign in as the demo account to see
+it. `npm run demo:clear` removes all of it and leaves the login alone.
+
+Two things worth knowing:
+
+- **It writes as that account, not as an administrator.** `scripts/demo-data.mts` signs in with the demo
+  password and goes through the anon key like the app does, so it can only ever reach that account's own
+  rows — no service-role key, nothing to leak. It refuses to run at all if the account it signed in as is
+  an administrator.
+- **The data is random but seeded**, so a re-run produces the same journal rather than a diff, and every
+  row it writes carries a *Demo data* tag. Because rows are scoped per user, none of it appears in your
+  own analytics or zakat — the demo account shows up in the Admin page's account list and trade count,
+  and nowhere else.
+
+### 8. Deploy
 
 Any Node host that can run `next build` / `next start` (Vercel is the shortest path). Set the same two
 environment variables there, add the deployed origin to Supabase's redirect list, and you are done. The
@@ -378,7 +429,7 @@ paints its cards and trades before the few hundred kilobytes of charting code ar
 
 ## Checks
 
-`npm test` runs four check scripts, all of which exist because a plausible wrong number — or a rule that
+`npm test` runs five check scripts, all of which exist because a plausible wrong number — or a rule that
 quietly stopped applying — is worse than a crash:
 
 - **`scripts/fee-check.mts`** — the published broker schedules (M+ worked examples, Moomoo's platform
@@ -388,14 +439,21 @@ quietly stopped applying — is worse than a crash:
 - **`scripts/calc-check.mts`** — gross P&L, risk, R formatting, percentages, holding-time buckets, and the
   Malaysian-time day/month boundaries including leap Februaries.
 - **`scripts/admin-check.mts`** — the access rules: code normalising, generated codes, an inclusive end
-  date, suspension outranking an end date, an admin that cannot be locked out, and what a used, expired or
-  switched-off code reads as. It also reads `supabase/admin.sql` and asserts the parts that would fail
+  date, suspension outranking an end date, an admin that cannot be locked out, what a used, expired or
+  switched-off code reads as, and the fortnight's warning window — its last day, the day it goes quiet
+  again, and which of the three notices the band is willing to draw. It also reads `supabase/admin.sql` and asserts the parts that would fail
   silently — that the code normalisation the form uses is the one the database uses, and that the guard
   which stops a customer promoting themselves is still there and still not `security definer`.
-- **`scripts/sql-check.mjs`** — runs `schema.sql`, `admin.sql`, `cashflow.sql` and `access.sql` against a
-  real Postgres (PGlite, in WASM) inside a fake Supabase environment, then tries to break in: sign up
-  with no code, reuse a spent one, promote myself, extend my own access, read the admin overview as a
-  customer. It is the only check that executes SQL at all, and it caught a bug on its first run.
+- **`scripts/demo-check.mts`** — recomputes the generated demo journal from its own prices: gross P&L,
+  risk from the stop, R measured after charges, board-lot sizes, entry sessions, no entry or exit on a
+  weekend or in the future, exits never before their entry, an open position carrying no result, and the
+  fee breakdown splitting the broker's side from the market's. A demo is the first thing a buyer sees, so
+  a wrong number in it is the product disagreeing with itself in front of an audience.
+- **`scripts/sql-check.mjs`** — runs `schema.sql`, `admin.sql`, `cashflow.sql`, `access.sql` and
+  `create-user.sql` against a real Postgres (PGlite, in WASM) inside a fake Supabase environment, then
+  tries to break in: sign up with no code, reuse a spent one, promote myself, extend my own access, read
+  the admin overview as a customer, create an account while claiming to be the administrator in signup
+  metadata. It is the only check that executes SQL at all, and it caught a bug on its first run.
   It then walks the access gate from both sides — a suspended and an expired account refused on every
   table and on the screenshot bucket, and an ordinary account still able to save a trade, a tag, a
   review, a payment and a picture — because a wrong turn in that clause would not be a hole, it would
@@ -414,7 +472,7 @@ app/                      routes (App Router)
   analytics, calendar, accounts, strategies, tags, reviews, zakat, settings, admin
 components/               shared UI: shell, sidebar, filter bar, stat cards, sparkline,
                           screenshots (input + gallery), sector tools, quick add, IPO fieldset,
-                          access-denied
+                          access-denied, access-expiry (the countdown band)
 components/ui/            shadcn/ui primitives on Radix + Tailwind
 lib/
   data.ts                 one cached loader per row set, plus the cache keys
@@ -426,8 +484,9 @@ lib/
   dates.ts                Malaysian-time helpers
   supabase/               browser, server and middleware clients
   utils.ts                cn()
-supabase/                 the five SQL files to run, in order
-scripts/                  the fee, calculation, access and SQL check scripts
+supabase/                 the SQL files to run, in order
+scripts/                  the check scripts (fees, calculations, access, demo, SQL)
+  demo-data.mts           generates the demo journal; `npm run demo:seed` / `demo:clear`
 middleware.ts             keeps the Supabase session fresh
 next.config.ts            security headers
 ```

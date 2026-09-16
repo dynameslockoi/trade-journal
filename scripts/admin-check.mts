@@ -9,14 +9,18 @@
  *   npm run test:access
  */
 import { readFileSync } from "node:fs";
+import type { AccessAccount } from "../lib/access.ts";
 import {
+  EXPIRY_WARNING_DAYS,
   accessState,
   dayGap,
   daysLeft,
+  expiryNotice,
   inviteState,
   isoDay,
   normalizeInviteCode,
   suggestInviteCode,
+  suggestPassword,
 } from "../lib/access.ts";
 
 let failures = 0;
@@ -48,6 +52,12 @@ check("the alphabet wraps rather than overflowing", suggestInviteCode([32], 1), 
 check("the alphabet really is 32 long", suggestInviteCode([0, 32, 64, 96, 128, 160, 192, 224], 8), "AAAAAAAA");
 check("no ambiguous characters", /^[^IO01]+$/.test(suggestInviteCode([10, 14, 26, 30, 24, 8, 3, 19])), "true");
 check("a shorter code when asked", suggestInviteCode([0, 0, 0, 0], 4), "AAAA");
+// The password offered when an account is created for somebody else. It is a starting point rather than
+// a rule, but it has to be long enough to survive being typed out and read aloud.
+check("a suggested password is fourteen characters", suggestPassword([1, 2, 3, 4, 5, 6, 7, 8]).length, 14);
+check("it is long enough to be worth something", suggestPassword(Array.from({ length: 14 }, (_, i) => i * 7)).length >= 12, "true");
+check("and readable aloud", /^[^IO01]+$/.test(suggestPassword([3, 7, 11, 19, 23, 29, 31, 2])), "true");
+check("the same bytes give the same password", suggestPassword([5, 5, 5, 5]), suggestPassword([5, 5, 5, 5]));
 
 /* ---------------------------------------------------------------- dates */
 check("a plain day", isoDay("2026-05-31"), "2026-05-31");
@@ -79,6 +89,41 @@ check("days left on an open-ended account", daysLeft(null, TODAY), "null");
 check("days left with a month to go", daysLeft("2026-10-16", TODAY), 30);
 check("days left after the end", daysLeft("2026-09-01", TODAY), -15);
 
+/* ---------------------------------------------------------------- the expiry countdown */
+// The band in the shell and the Access card in Settings both read this. Its failure mode is quiet in
+// one direction and loud in the other: a day's error the wrong way either nags a customer whose access
+// is nowhere near ending, or stays silent on the last day and lets the journal stop without warning.
+const notice = (over: Partial<AccessAccount> = {}) =>
+  expiryNotice({ status: "active", access_until: null, ...over }, TODAY);
+check("an open-ended account is never warned", notice(), "null");
+check("an admin is never warned", expiryNotice({ is_admin: true, access_until: "2026-09-18" }, TODAY), "null");
+check("no profile at all is never warned", expiryNotice(null, TODAY), "null");
+// Beyond the window there is a notice, but not an urgent one: Settings mentions the date, the shell stays quiet.
+check("a date next year is only scheduled", notice({ access_until: "2027-01-01" }).key, "scheduled");
+check("a day outside the window is only scheduled", notice({ access_until: "2026-10-01" }).key, "scheduled");
+check("the window's last day is urgent", notice({ access_until: "2026-09-30" }).key, "due-soon");
+check("the window is fourteen days", EXPIRY_WARNING_DAYS, 14);
+check("a custom window is honoured", expiryNotice({ access_until: "2026-10-10" }, TODAY, { withinDays: 30 }).key, "due-soon");
+check("two days out", notice({ access_until: "2026-09-18" }).label, "Your access ends in 2 days");
+check("one day out is singular", notice({ access_until: "2026-09-17" }).label, "Your access ends in 1 day");
+check("the last day has its own wording", notice({ access_until: TODAY }).label, "Your access ends today");
+check("the last day counts zero days left", notice({ access_until: TODAY }).days, 0);
+// accessState lets the last day through, so the band is the only thing standing between a customer and
+// a journal that silently stops opening tomorrow.
+check("the last day is still allowed in", accessState({ access_until: TODAY }, TODAY).ok, "true");
+check("the day after is expired", notice({ access_until: "2026-09-15" }).key, "expired");
+check("an expired notice counts backwards", notice({ access_until: "2026-09-06" }).days, -10);
+// The keys decide where each notice is shown: only `due-soon` is drawn as a band, so a key that
+// drifted would either silence the countdown or make an expired account's band unreachable.
+check("the urgent key is the one the band draws", notice({ access_until: "2026-09-20" }).key, "due-soon");
+check("the wording names the date", notice({ access_until: "2026-09-20" }).detail.includes("2026-09-20"), "true");
+// The app passes `dateLabel` so a customer reads "20 Sept 2026"; the default stays machine-readable.
+check(
+  "a formatter replaces the raw date",
+  expiryNotice({ access_until: "2026-09-20" }, TODAY, { formatDate: () => "20 Sept 2026" }).detail.includes("20 Sept 2026"),
+  "true",
+);
+
 /* ---------------------------------------------------------------- invites */
 const invite = (over: Partial<Parameters<typeof inviteState>[0]> = {}) => ({
   disabled: false,
@@ -97,6 +142,22 @@ check("a code on its last day", inviteState(invite({ expires_at: TODAY }), TODAY
 // Switched off wins: that is the state an admin chose, and the one they would undo.
 check("off outranks expired", inviteState(invite({ disabled: true, expires_at: "2026-01-01" }), TODAY).key, "disabled");
 check("used outranks a future date", inviteState(invite({ used_count: 1, expires_at: "2027-01-01" }), TODAY).key, "used");
+
+/* ---------------------------------------------------------------- the band is really mounted */
+// A judgement nothing renders is the same as no notice at all, and the shell is the only place that can
+// put one on every page — so the two links in that chain are worth pinning.
+const shell = readFileSync(new URL("../components/app-shell.tsx", import.meta.url), "utf8");
+check("the shell mounts the countdown", shell.includes("<AccessExpiry notice={notice} />"), "true");
+check("the shell asks for the notice", shell.includes("expiryNotice(me.data"), "true");
+// The band draws one key only: `scheduled` would nag a year-long account, and `expired` can never be
+// reached there because the shell stops those accounts first.
+const band = readFileSync(new URL("../components/access-expiry.tsx", import.meta.url), "utf8");
+check("the band draws only the urgent key", band.includes('notice.key !== "due-soon"'), "true");
+// An expired customer gets the blocked screen, and that screen has to use the formatted date rather
+// than the ISO string `accessState` carries — it is the last thing they read.
+check("the blocked screen takes the notice", shell.includes("<AccessDenied state={access} notice={notice}"), "true");
+const denied = readFileSync(new URL("../components/access-denied.tsx", import.meta.url), "utf8");
+check("the blocked screen prefers the formatted date", denied.includes("notice.detail : state.detail"), "true");
 
 /* ---------------------------------------------------------------- the SQL agrees */
 // The form normalises a code and the database normalises it again; if the two rules drift, a code the

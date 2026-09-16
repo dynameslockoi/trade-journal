@@ -53,6 +53,32 @@ async function allowed(label, sql) {
 
 const db = new PGlite();
 
+/**
+ * pgcrypto is what hashes a password the way GoTrue does. PGlite may not carry the extension, so a
+ * stand-in is defined in the same schema the real one lives in: the checks below prove the function
+ * reaches the right place with the right arguments, not that the hash is bcrypt — that part is
+ * GoTrue's and is not this project's to test.
+ */
+async function ensureCrypt(target) {
+  try {
+    await target.exec(`create schema if not exists extensions; create extension if not exists pgcrypto with schema extensions`);
+    // Qualified on purpose: the session's search path does not include `extensions`, which is exactly
+    // why the function under test puts it on its own path.
+    const probe = await target.query(`select length(extensions.crypt('probe', extensions.gen_salt('bf'))) as n`);
+    if (Number(probe.rows[0]?.n) > 10) return "pgcrypto";
+  } catch {
+    /* fall through to the stand-in */
+  }
+  await target.exec(`
+    create schema if not exists extensions;
+    create or replace function extensions.gen_salt(kind text) returns text language sql as $$ select 'stand-in-salt'; $$;
+    create or replace function extensions.crypt(password text, salt text) returns text language sql as $$
+      select 'stand-in-hash:' || password || ':' || salt;
+    $$;
+  `);
+  return "stand-in";
+}
+
 /* ---------------------------------------------------------------- a Supabase-ish environment */
 await db.exec(`
   create role anon;
@@ -107,6 +133,53 @@ try {
   pgcrypto = false;
   console.log("NOTE  pgcrypto is unavailable in this build; gen_random_bytes is not exercised");
 }
+const cryptKind = await ensureCrypt(db);
+console.log(`NOTE  password hashing: ${cryptKind}`);
+
+/**
+ * `auth.users` as GoTrue really has it, which is wider than the three columns the signup gate needs.
+ * Two of these are the traps a hand-written insert falls into:
+ *
+ *   * `aud`, `role` and `instance_id` are *nullable* with no default — GoTrue fills all three in code —
+ *     and the lookup that matches an email and password goes through all three (see `signInLookup`
+ *     below). Leaving one of them NULL means the account exists, the password is right, and every
+ *     sign-in is refused as invalid credentials. `instance_id` is the one that actually shipped that
+ *     way, which is why the check that strands a row nulls all three.
+ *   * `is_sso_user` is NOT NULL with no default, so an insert that does not name it fails with a message
+ *     about a column nobody here has heard of; `email_change` is modelled the same way because a NULL
+ *     there breaks GoTrue's own scan of the row into a Go string.
+ *
+ * They are added with defaults so the signup-gate checks below can keep inserting three columns, and
+ * the defaults are dropped further down — right before the account-creating checks — so that the
+ * function's catalogue-driven fill is exercised against the shape it exists for.
+ */
+await db.exec(`
+  alter table auth.users add column if not exists aud text;
+  alter table auth.users add column if not exists "role" text;
+  alter table auth.users add column if not exists instance_id uuid;
+  alter table auth.users add column if not exists is_sso_user boolean default false;
+  alter table auth.users add column if not exists email_change text default '';
+  alter table auth.users add column if not exists encrypted_password text;
+  alter table auth.users add column if not exists email_confirmed_at timestamptz;
+  alter table auth.users add column if not exists raw_app_meta_data jsonb;
+  -- The second trap, and the one that hides behind the first: these are NULLable with no default in the
+  -- schema, GoTrue writes them itself, and it reads them back into a time.Time and plain strings that
+  -- cannot hold NULL. A row missing them is *found* by the lookup and then unreadable, which the grant
+  -- reports as "500 Database error querying schema" — a different message from the one a missing
+  -- audience gives, which is how the two failures were told apart.
+  alter table auth.users add column if not exists updated_at timestamptz;
+  alter table auth.users add column if not exists confirmation_token text;
+  alter table auth.users add column if not exists recovery_token text;
+  alter table auth.users add column if not exists email_change_token_current text;
+  alter table auth.users add column if not exists email_change_token_new text;
+  alter table auth.users add column if not exists phone_change text;
+  alter table auth.users add column if not exists phone_change_token text;
+  alter table auth.users add column if not exists reauthentication_token text;
+  create table if not exists auth.identities (
+    id uuid primary key, user_id uuid, provider_id text, identity_data jsonb,
+    provider text, last_sign_in_at timestamptz, created_at timestamptz, updated_at timestamptz
+  );
+`);
 
 /* ---------------------------------------------------------------- the real files */
 const schema = readFileSync("supabase/schema.sql", "utf8");
@@ -128,6 +201,18 @@ ok("cashflow.sql applies");
 
 await db.exec(readFileSync("supabase/access.sql", "utf8"));
 ok("access.sql applies");
+
+// `create-user.sql` replaces the signup trigger, so it runs after `admin.sql` and every gate check
+// below is exercising the replacement rather than the original. Its one pgcrypto line is dropped in a
+// build without the extension, the same way `schema.sql`'s is, because the stand-in already covers it.
+const createUser = readFileSync("supabase/create-user.sql", "utf8");
+try {
+  await db.exec(createUser);
+} catch (e) {
+  if (pgcrypto || !/pgcrypto/i.test(String(e.message ?? e))) throw e;
+  await db.exec(createUser.replace(/create extension if not exists pgcrypto with schema extensions;/, "-- no pgcrypto in this build"));
+}
+ok("create-user.sql applies");
 
 /* ---------------------------------------------------------------- the signup gate */
 const OWNER = "11111111-1111-1111-1111-111111111111";
@@ -536,6 +621,239 @@ await refused(
   check("a visitor gets an empty journal rather than an error", (await countOf("trades")) === 0);
   await refused("a visitor cannot log a trade", `insert into public.trades(user_id, symbol, direction, entry_at) values ('${CUSTOMER}', 'X', 'long', now())`, "row-level security");
   await db.exec(`reset role`);
+}
+
+/* ---------------------------------------------------------------- accounts an administrator creates */
+//
+// The signup gate is invite-only, and the administrator needs a way past it for accounts nobody is
+// confirming an email for: a test or demo login, or a customer being onboarded by hand. Two things
+// have to hold at once, and they pull in opposite directions — the exemption has to work for the
+// admin, and it must not become a way for anybody else to skip the invitation.
+{
+  const signInAs = async (id) => {
+    await db.exec(`reset role`);
+    await db.exec(`set role authenticated`);
+    await db.exec(`select set_config('request.jwt.claims', '{"sub":"${id}"}', false)`);
+  };
+  const signOut = async () => {
+    await db.exec(`reset role`);
+    await db.exec(`select set_config('request.jwt.claims', '', false)`);
+  };
+  const asAdmin = () => signInAs(OWNER);
+  const asCustomer = () => signInAs(CUSTOMER);
+  /**
+   * Read a row as the database owner, not as the signed-in role: the assertions are about what the
+   * function actually wrote, and the `auth` schema is not the API's to read at all. The role is reset
+   * first, so a caller has to say which role it wants before the next request.
+   */
+  const raw = async (sql) => {
+    await db.exec(`reset role`);
+    return (await db.query(sql)).rows;
+  };
+  const rpc = async (sql) => (await db.query(sql)).rows;
+
+  // The columns that are NULLable with no default, now that the signup-gate checks are done with the
+  // stub: from here an insert that does not name them leaves them NULL, as the real schema would. The
+  // two NOT NULL ones lose their defaults so that an insert omitting them fails outright; `created_at`
+  // keeps its default until here because the signup-gate inserts above only name three columns.
+  await db.exec(`
+    update auth.users set is_sso_user = false, email_change = '';
+    alter table auth.users alter column is_sso_user drop default;
+    alter table auth.users alter column email_change drop default;
+    alter table auth.users alter column is_sso_user set not null;
+    alter table auth.users alter column email_change set not null;
+    alter table auth.users alter column created_at drop default;
+    alter table auth.users alter column created_at drop not null;
+    -- Rows left without an audience, the state the first version of the file produced.
+    update auth.users set aud = null, "role" = null;
+  `);
+
+  const codesBefore = Number((await raw(`select coalesce(sum(used_count), 0)::int as n from public.invite_codes`))[0]?.n ?? -1);
+
+  // GoTrue's password grant looks a user up with exactly this predicate — `FindUserByEmailAndAudience`
+  // in GoTrue's `internal/models/user.go` — so it is written out verbatim rather than approximated.
+  // The columns it names are the columns a hand-written insert has to get right, and three of them
+  // (`instance_id`, `aud`, `is_sso_user`) are precisely the ones a naive insert never mentions.
+  const signInLookup = (email) =>
+    `select id from auth.users where instance_id = '00000000-0000-0000-0000-000000000000'` +
+    ` and lower(email) = '${email}' and aud = 'authenticated' and is_sso_user = false`;
+
+  await asAdmin();
+  const created = (await rpc(`select public.admin_create_user('Demo@Example.com', 'abcd1234', 'Demo', '2026-12-31', 'testing') as r`))[0]?.r;
+  check("an administrator can create an account", created?.ok === true, JSON.stringify(created));
+
+  const row = (await raw(`select id, email, email_confirmed_at, encrypted_password, raw_app_meta_data, aud, "role", instance_id, is_sso_user, email_change from auth.users where email = 'demo@example.com'`))[0];
+  check("the address is stored the way sign-in looks it up", row?.email === "demo@example.com", JSON.stringify(row?.email));
+  // This is the line that removes the email round trip: a set confirmation date is what lets GoTrue
+  // mint a session without one.
+  check("the account is already confirmed", Boolean(row?.email_confirmed_at), JSON.stringify(row?.email_confirmed_at));
+  check("the password was hashed, not stored", String(row?.encrypted_password ?? "").length > 10 && row?.encrypted_password !== "abcd1234", JSON.stringify(String(row?.encrypted_password).slice(0, 12)));
+  check("the provider metadata is set", row?.raw_app_meta_data?.providers?.[0] === "email", JSON.stringify(row?.raw_app_meta_data));
+  // The audience GoTrue looks an account up by. Without it the password is right and the sign-in is
+  // still refused, which is exactly what a first version of this file shipped.
+  check(
+    "the account carries the audience sign-in looks it up by",
+    row?.aud === "authenticated" && row?.role === "authenticated",
+    JSON.stringify({ aud: row?.aud, role: row?.role }),
+  );
+  // "The column is set" and "the lookup finds it" are only the same thing as long as this stays true.
+  const lookedUp = (await raw(signInLookup("demo@example.com")))[0];
+  check("and the lookup a password grant runs finds it", lookedUp?.id === row?.id, JSON.stringify(lookedUp));
+
+  // The other half of the same bug, one step later in the request: GoTrue reads these into a time.Time
+  // and plain strings, so a NULL does not hide the account — it makes reading it fail, and the grant
+  // answers "500 Database error querying schema" on a row that is otherwise perfect. Checked one column
+  // at a time, because "the row has no NULL somewhere" would not say which one is missing.
+  const canonical = (await raw(`select created_at, updated_at, confirmation_token, recovery_token, email_change, email_change_token_current, email_change_token_new, phone_change, phone_change_token, reauthentication_token from auth.users where email = 'demo@example.com'`))[0];
+  const nullCanonical = Object.entries(canonical ?? {}).filter(([, v]) => v === null).map(([k]) => k);
+  check(
+    "the columns GoTrue reads the row back into are all filled",
+    nullCanonical.length === 0,
+    `NULL in: ${nullCanonical.join(', ')}`,
+  );
+
+  // The row the first version of the file left behind: created, confirmed, password hashed — and
+  // invisible to sign-in, because the columns GoTrue fills in code were never filled. This is the bug
+  // that shipped, reproduced, so the repair below is measured against the real failure rather than
+  // against a description of it. All three lookup columns and the columns the row is read back through
+  // are nulled, because all of them were missing from that version's insert.
+  await raw(`update auth.users set aud = null, "role" = null, instance_id = null, created_at = null, updated_at = null, confirmation_token = null, recovery_token = null, email_change_token_new = null where email = 'demo@example.com'`);
+  const invisible = (await raw(signInLookup("demo@example.com"))).length;
+  check("an account created by the first version is invisible to sign-in", invisible === 0, `${invisible} rows found by the lookup`);
+  const stranded = (await raw(`select created_at, confirmation_token, email_change_token_new from auth.users where email = 'demo@example.com'`))[0];
+  check(
+    "and the columns GoTrue reads it back through were left NULL too",
+    stranded?.created_at === null && stranded?.confirmation_token === null && stranded?.email_change_token_new === null,
+    JSON.stringify(stranded),
+  );
+  // Columns the insert never names: one required with no default, one optional that must not be left
+  // NULL. Both come from the catalogue rather than from a list somebody guessed.
+  check(
+    "required columns the insert did not name were filled",
+    row?.is_sso_user === false && row?.email_change === "" && row?.instance_id === "00000000-0000-0000-0000-000000000000",
+    JSON.stringify({ is_sso_user: row?.is_sso_user, email_change: row?.email_change, instance_id: row?.instance_id }),
+  );
+
+
+  // GoTrue signs a password grant in against an identity row, not just the user row: without this the
+  // account exists, the password is right, and every sign-in is refused as invalid credentials.
+  const identity = (await raw(`select provider, identity_data from auth.identities where user_id = '${row?.id}'`))[0];
+  check("an identity row is created for the password grant", identity?.provider === "email", JSON.stringify(identity?.provider));
+  check("its subject is the user id", identity?.identity_data?.sub === row?.id, JSON.stringify(identity?.identity_data));
+
+  const profile = (await raw(`select display_name, status, access_until, invite_code, is_admin from public.profiles where id = '${row?.id}'`))[0];
+  check("the profile carries the name", profile?.display_name === "Demo", JSON.stringify(profile?.display_name));
+  // A date column comes back from PGlite as a Date, so it is compared by its day rather than by type.
+  check("the end date was set at creation", new Date(profile?.access_until).toISOString().slice(0, 10) === "2026-12-31", JSON.stringify(profile?.access_until));
+  check("the account starts active", profile?.status === "active");
+  check("it is not an administrator itself", profile?.is_admin === false);
+  // No invitation code was needed, so none may be spent: the count is the assertion that the exemption
+  // did not quietly consume somebody's seat.
+  check(
+    "no invitation code was consumed",
+    Number((await raw(`select coalesce(sum(used_count), 0)::int as n from public.invite_codes`))[0]?.n ?? -1) === codesBefore,
+  );
+
+  // Refusals a person causes come back as a sentence the dialog can show, not as a database error.
+  await asAdmin();
+  const duplicate = (await rpc(`select public.admin_create_user('demo@example.com', 'abcd1234') as r`))[0]?.r;
+  check("a duplicate address is refused with a reason", duplicate?.ok === false && /already has an account/.test(duplicate?.reason ?? ""), JSON.stringify(duplicate));
+  const weak = (await rpc(`select public.admin_create_user('weak@example.com', 'short') as r`))[0]?.r;
+  check("a short password is refused with a reason", weak?.ok === false && /at least 8/.test(weak?.reason ?? ""), JSON.stringify(weak));
+  const junk = (await rpc(`select public.admin_create_user('not an address', 'abcd1234') as r`))[0]?.r;
+  check("a malformed address is refused", junk?.ok === false, JSON.stringify(junk));
+  check(
+    "a refused call created nothing",
+    Number((await raw(`select count(*)::int as n from auth.users where email in ('weak@example.com', 'not an address')`))[0]?.n) === 0,
+  );
+
+  // The repair statement the file ships, run against that row.
+  const repair = readFileSync("supabase/create-user.sql", "utf8").match(/update auth\.users[\s\S]*?or reauthentication_token is null;/i)?.[0];
+  check("the file carries the repair", Boolean(repair), "no repair statement found");
+  await db.exec(repair);
+  const repaired = (await raw(`select aud, "role", instance_id, created_at, confirmation_token, email_change_token_new from auth.users where email = 'demo@example.com'`))[0];
+  check(
+    "and the repair puts back every column sign-in looks through",
+    repaired?.aud === "authenticated" &&
+      repaired?.role === "authenticated" &&
+      repaired?.instance_id === "00000000-0000-0000-0000-000000000000",
+    JSON.stringify(repaired),
+  );
+  check(
+    "and the columns the row is read back through",
+    repaired?.created_at !== null &&
+      repaired?.confirmation_token === "" &&
+      repaired?.email_change_token_new === "",
+    JSON.stringify({ created_at: repaired?.created_at, confirmation_token: repaired?.confirmation_token, email_change_token_new: repaired?.email_change_token_new }),
+  );
+  check(
+    "so the repaired account is findable again",
+    (await raw(signInLookup("demo@example.com")))[0]?.id === row?.id,
+    JSON.stringify(await raw(signInLookup("demo@example.com"))),
+  );
+
+  // The file's own report, so the query an operator runs to ask "is anything still stranded?" is itself
+  // tested: after the repair it must come back empty, and it only looks at accounts this file made.
+  const strandedQuery = readFileSync("supabase/create-user.sql", "utf8").match(/select u\.email,[\s\S]*?or u\.reauthentication_token is null\);/i)?.[0];
+  check("the file carries a stranded-account check", Boolean(strandedQuery), "no check found");
+  const leftStranded = (await raw(strandedQuery)).length;
+  check("and it finds nothing left to repair", leftStranded === 0, `${leftStranded} accounts still stranded`);
+
+  /* --- the exemption cannot be borrowed -------------------------------------------------------- */
+  await asCustomer();
+  await refused("a customer cannot create accounts", `select public.admin_create_user('sneak@example.com', 'abcd1234')`, "Only an administrator");
+
+  // `created_by_admin` is a value in the signup metadata, and any signup form — or anybody posting
+  // straight at the auth API — can send it. So the gate is tested the way it really arrives: the auth
+  // server performs the insert, carrying whatever claims the request had. Only the last one, with an
+  // administrator behind it, is allowed through without a code.
+  // Everything the auth server itself supplies is named here, so the only thing left that can refuse
+  // the row is the trigger — which is what these three checks are about.
+  const signupRow = (email, metadata) =>
+    `insert into auth.users(id, email, raw_user_meta_data, aud, "role", instance_id, is_sso_user, email_change) values (gen_random_uuid(), '${email}', '${metadata}'::jsonb, 'authenticated', 'authenticated', '00000000-0000-0000-0000-000000000000', false, '')`;
+  /** The auth server writes `auth.users`, and it does so with the caller's claims attached. */
+  const asAuthServer = async (id) => {
+    await db.exec(`reset role`);
+    await db.exec(`select set_config('request.jwt.claims', ${id ? `'{"sub":"${id}"}'` : "''"}, false)`);
+  };
+
+  await asAuthServer(CUSTOMER);
+  await refused(
+    "a customer cannot claim to be the administrator in signup metadata",
+    signupRow("sneaky@example.com", '{"created_by_admin":true}'),
+    "invitation code is required",
+  );
+  await asAuthServer(null);
+  await refused(
+    "and neither can a server-side insert with no session",
+    signupRow("server@example.com", '{"created_by_admin":true}'),
+    "invitation code is required",
+  );
+
+  // The other half: with an administrator behind it, the flag is honoured and no code is touched.
+  await asAuthServer(OWNER);
+  await allowed(
+    "an administrator's flag is honoured",
+    signupRow("byadmin@example.com", '{"created_by_admin":true,"display_name":"By Admin"}'),
+  );
+  const byAdmin = (await raw(`select p.invite_code, p.display_name from public.profiles p join auth.users u on u.id = p.id where u.email = 'byadmin@example.com'`))[0];
+  check("and its profile carries no invitation code", byAdmin?.invite_code === null, JSON.stringify(byAdmin));
+  check("while the name still comes through", byAdmin?.display_name === "By Admin", JSON.stringify(byAdmin?.display_name));
+
+  /* --- an older identities table --------------------------------------------------------------- */
+  // `provider_id` was split out of the identity id in a later GoTrue. The function checks which shape
+  // it is talking to, so both are exercised: this drops the column and puts the id back to text, the
+  // way the older schema had it.
+  await db.exec(`reset role`);
+  await db.exec(`alter table auth.identities drop column provider_id`);
+  await db.exec(`alter table auth.identities alter column id type text`);
+  await asAdmin();
+  const legacy = (await rpc(`select public.admin_create_user('legacy@example.com', 'abcd1234', 'Legacy') as r`))[0]?.r;
+  check("an older identities table still works", legacy?.ok === true, JSON.stringify(legacy));
+  const legacyIdentity = (await raw(`select i.id, i.identity_data from auth.identities i join auth.users u on u.id = i.user_id where u.email = 'legacy@example.com'`))[0];
+  check("the legacy identity is keyed on the user id", legacyIdentity?.id === legacy?.id, JSON.stringify(legacyIdentity?.id));
+
+  await signOut();
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nThe SQL does what it says");

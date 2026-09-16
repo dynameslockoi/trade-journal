@@ -4,6 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { KEYS } from "@/lib/data";
+import { loadMe, type Me } from "@/lib/admin";
+import { expiryNotice } from "@/lib/access";
+import { useCachedQuery } from "@/lib/query-cache";
+import { dateLabel, toISODate, today as todayInMalaysia } from "@/lib/dates";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +23,32 @@ export default function Settings() {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  /**
+   * When this account's access runs out.
+   *
+   * Read through the cache key the shell already fills on the way in, so opening Settings costs no
+   * request for it. The date belongs here rather than only in the countdown band, because the band
+   * deliberately stays quiet until a fortnight out — this is where a customer can always look it up.
+   */
+  const me = useCachedQuery<Me | null>(KEYS.me, loadMe, { enabled: true });
+  const notice = expiryNotice(me.data, toISODate(todayInMalaysia()), { formatDate: dateLabel });
+  /**
+   * The line under the card. A read that failed is said out loud rather than dressed up as
+   * "open-ended" — an empty date field and an unknown one look identical otherwise, and the customer
+   * is the one asking because they want to know.
+   */
+  const accessNote = !me.data
+    ? "Your access details could not be read just now — reload the page to try again."
+    : me.data.is_admin
+      ? "This is the account that runs the journal, so it has no end date of its own."
+      : !notice
+        ? "No end date. The journal stays open until we say otherwise."
+        : notice.days < 0
+          ? `This account's access ended on ${dateLabel(notice.until)}. Renewing it is a one-line change on our side.`
+          : notice.days === 0
+            ? `Today is the last day of access — after ${dateLabel(notice.until)} the journal stops opening until it is renewed.`
+            : `${dateLabel(notice.until)} is the last day of access, which is ${notice.days} day${notice.days === 1 ? "" : "s"} from now.`;
 
   useEffect(() => {
     (async () => {
@@ -97,6 +128,40 @@ export default function Settings() {
             <Button disabled={busy}>Save name</Button>
           </CardFooter>
         </form>
+      </Card>
+
+      <Card className="settings-card">
+        <CardHeader><CardTitle>Access</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid two">
+            <div className="form-field">
+              <Label htmlFor="set-access-until">Access ends</Label>
+              <Input id="set-access-until" value={notice ? dateLabel(notice.until) : "No end date"} readOnly disabled />
+            </div>
+            <div className="form-field">
+              <Label htmlFor="set-access-left">Time left</Label>
+              <Input
+                id="set-access-left"
+                readOnly
+                disabled
+                value={
+                  !notice
+                    ? "Open-ended"
+                    : notice.days < 0
+                      ? "Ended"
+                      : notice.days === 0
+                        ? "Last day"
+                        : `${notice.days} day${notice.days === 1 ? "" : "s"}`
+                }
+              />
+            </div>
+          </div>
+        </CardContent>
+        <CardFooter className="settings-foot">
+          {/* Two weeks out, the shell also shows this above every page — this card is the quiet
+              version, so it says the date rather than repeating the warning. */}
+          <span className="muted">{accessNote}</span>
+        </CardFooter>
       </Card>
 
       <Card className="settings-card">

@@ -115,6 +115,92 @@ export function accessState(account: AccessAccount | null | undefined, today: st
   return { ok: true, reason: null, label: "Active", detail: "" };
 }
 
+/**
+ * How many days before the end date a customer starts being told about it. Two weeks is long enough to
+ * renew without hurrying and short enough that the notice still reads as news rather than decoration —
+ * an account with a year of access should not wear a permanent warning band.
+ */
+export const EXPIRY_WARNING_DAYS = 14;
+
+export type AccessNotice = {
+  /**
+   * `due-soon` is the one that earns a band in the shell. `scheduled` is for the settings page, and
+   * `expired` is for the blocked screen — an expired account never sees the band, because the journal
+   * is already closed to it.
+   */
+  key: "expired" | "due-soon" | "scheduled";
+  /** The last day of access, `YYYY-MM-DD`. */
+  until: string;
+  /** Whole days from today to that day; negative once it has passed. */
+  days: number;
+  /** Short heading: "Your access ends in 5 days". */
+  label: string;
+  /** One sentence naming the date, for the line under the heading. */
+  detail: string;
+};
+
+/**
+ * What (if anything) to tell an account about its own end date.
+ *
+ * Separate from `accessState` on purpose: that answers "may this account in?" and is a full stop, while
+ * this answers "how long have I got?" and is a nudge. An account can be perfectly allowed in and still
+ * have three days left — which is exactly the customer who needs telling, and the one the blocked
+ * screen cannot reach, because it only exists once access is already gone.
+ *
+ * Open-ended accounts and admins never get a notice: there is no date to count down, and an admin
+ * locking themselves out is not something a banner should be warning about.
+ *
+ * The date is written by `formatDate`, which defaults to the raw `YYYY-MM-DD` so this file stays free
+ * of imports and the tests can assert on a fixed string. The app passes the same `dateLabel()` the
+ * rest of the pages use, because a sentence a customer reads should not contain "2026-09-30".
+ */
+export function expiryNotice(
+  account: AccessAccount | null | undefined,
+  today: string,
+  { withinDays = EXPIRY_WARNING_DAYS, formatDate = (iso: string) => iso }: { withinDays?: number; formatDate?: (iso: string) => string } = {},
+): AccessNotice | null {
+  if (!account || account.is_admin) return null;
+  const until = isoDay(account.access_until);
+  if (!until) return null;
+  const days = dayGap(today, until);
+  const last = `After ${formatDate(until)} the journal stops opening until access is renewed.`;
+  if (days < 0) {
+    return {
+      key: "expired",
+      until,
+      days,
+      label: "Your access has ended",
+      detail: `Access ended on ${formatDate(until)}. Renewing it is a one-line change on our side.`,
+    };
+  }
+  if (days === 0) {
+    return { key: "due-soon", until, days, label: "Your access ends today", detail: `Today is the last day. ${last}` };
+  }
+  if (days <= withinDays) {
+    return {
+      key: "due-soon",
+      until,
+      days,
+      label: `Your access ends in ${days} day${days === 1 ? "" : "s"}`,
+      detail: `${formatDate(until)} is the last day. ${last}`,
+    };
+  }
+  return { key: "scheduled", until, days, label: `Access ends ${formatDate(until)}`, detail: `${days} days left.` };
+}
+
+/**
+ * A password for an account somebody else is being handed: an onboarding, or a test login.
+ *
+ * Drawn from the same alphabet as an invitation code, and for the same reason — a password read off a
+ * screen or passed on the phone should not contain `I`, `l`, `0` and `O`. Fourteen characters is 70
+ * bits, which is not a password anybody is going to guess, and it is still short enough to type.
+ *
+ * It is offered as a starting point, not imposed: the administrator can type their own.
+ */
+export function suggestPassword(bytes: ArrayLike<number>, length = 14): string {
+  return suggestInviteCode(bytes, length);
+}
+
 export type InviteTone = "ok" | "warn" | "danger";
 
 export type InviteState = {

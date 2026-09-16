@@ -1101,6 +1101,28 @@ button.year-cell:disabled, button.ss-cell:disabled { cursor: default; }
 .ctl-alert { padding: 11px 13px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--tile); font-size: 12px; }
 .ctl-alert-title { font-weight: 700; }
 .ctl-alert-desc { margin-top: 3px; font-size: 11.5px; color: var(--text-dim); }
+/* The amber "running out" tone, drawn from the same palette as `.badge-warn`. The description
+   inherits the tone's ink instead of the neutral dim colour, which is unreadable on amber. */
+/* An input paired with the button that acts on it — the generated password, or the field it fills. */
+.admin-credential { display: flex; align-items: center; gap: 8px; }
+.admin-credential > :first-child { flex: 1 1 auto; min-width: 0; }
+.admin-credential code {
+  flex: 1 1 auto; min-width: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--tile); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  overflow-x: auto; white-space: nowrap;
+}
+
+.ctl-alert.warn { border-color: var(--ipo-border); background: var(--ipo-bg); color: var(--ipo-text); }
+.ctl-alert.warn .ctl-alert-desc { color: inherit; opacity: 0.85; }
+/* --- access countdown ------------------------------------------------------- */
+/* Sits between the topbar and the page, so it borrows `.content`'s padding and centring to line up
+   with the blocks below it — and follows the same two breakpoints as that padding shrinks. */
+.expiry-wrap { padding: 16px 24px 0; max-width: 1600px; margin: 0 auto; width: 100%; }
+.expiry-band { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.expiry-copy { min-width: 0; }
+.expiry-title { display: flex; align-items: center; gap: 6px; }
+.expiry-dismiss { flex: none; color: inherit; opacity: 0.8; }
+.expiry-dismiss:hover { opacity: 1; }
 /* A failed load reads as a notice above the page's own blocks, spaced like the grids are. */
 .load-error { margin-bottom: 14px; }
 
@@ -1201,6 +1223,7 @@ td.admin-account { white-space: normal; min-width: 210px; }
   .sidebar .brand { justify-content: center; padding: 0; }
   .main { margin-left: 68px; width: calc(100% - 68px); }
   .content { padding: 20px 18px 32px; }
+  .expiry-wrap { padding: 14px 18px 0; }
 }
 @media (max-width: 700px) {
   .topbar { height: 56px; padding: 0 14px; }
@@ -1213,6 +1236,7 @@ td.admin-account { white-space: normal; min-width: 210px; }
   .calc-strip { gap: 9px; flex-direction: column; }
   .filter-head { align-items: flex-start; flex-wrap: wrap; }
   .content { padding: 16px 14px 24px; }
+  .expiry-wrap { padding: 12px 14px 0; }
   .card-pad { padding: 15px; }
   .card-header { padding: 15px 15px 0; }
   .card-content { padding: 15px; }

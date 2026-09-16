@@ -9,6 +9,8 @@ const alertVariants = cva("ctl-alert", {
       /** Reuses the app's `.error` / `.success` ink so a notice reads the same as before. */
       error: "error",
       success: "success",
+      /** The amber "this is coming" tone, the same palette the IPO badge uses. */
+      warn: "warn",
     },
   },
   defaultVariants: { variant: "default" },
