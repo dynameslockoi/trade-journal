@@ -1,3 +1,18 @@
+## Phase 13
+
+Two changes to how the journal is fed. **Screenshots can now arrive three ways** — the file picker,
+drag and drop onto the box, or a plain **paste** anywhere on the page, which is the fastest route
+when the chart is already on the clipboard. A drop beside the box no longer takes the form down with
+it (a file-drag guard stops the browser opening the image in the tab while leaving text drags alone),
+duplicates are caught by name and size rather than by timestamp, and an oversized or non-image file is
+refused with a reason before the trade is saved. **Capital now follows the money:**
+`supabase/cashflow.sql` adds `account_cash_flows` — one row per deposit or withdrawal — and every
+percentage the app quotes divides by `deposits − withdrawals` instead of the single opening balance,
+so a top-up or a profit taken out is visible instead of silently drifting equity. The script seeds
+each account's existing opening balance as its first deposit, so no number moves when it runs. Until
+it does, the app falls back to the opening balance and the Accounts page says what to run. See
+`PHASE13.md`.
+
 ## Phase 12
 
 An external audit of this project came back with 40 findings; this phase answers them one by one.
@@ -81,6 +96,11 @@ a service-role key.
 Then run `supabase/hardening.sql` **once** (Phase 12). It adds the ownership constraints, the
 column-level checks, the storage bucket's size and MIME limits and the journal's indexes. Everything
 in it is `NOT VALID`, so no historic row is rejected, and it is safe to re-run.
+
+Then run `supabase/cashflow.sql` **once** (Phase 13) to record deposits and withdrawals. It seeds
+each account's opening balance as its first deposit, so the capital every page divides by does not
+move; it is safe to re-run. The app works without it — it falls back to the opening balance — but the
+deposit/withdraw controls on the Accounts page stay hidden until it has been run.
 
 Then:
 ```bash

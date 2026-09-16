@@ -12,29 +12,23 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { calculateStats, embedAccount, embedStrategy, formatMoney, formatR, metricSeries, normalizeTrade, percentOf, shortDate, type Trade } from "@/lib/trading";
+import { calculateStats, capitalBehind, capitalByAccount, embedAccount, embedStrategy, formatMoney, formatR, metricSeries, normalizeTrade, percentOf, shortDate, type CashFlow, type Trade } from "@/lib/trading";
 
-type Account={id:string;name:string;starting_balance:number;currency:string};
-
-/** The capital a drawdown is best read against: the selected account, or every account funded. */
-function capitalBehind(accounts: Account[], selectedId: string) {
- const funded = accounts.reduce((sum, a) => sum + Number(a.starting_balance || 0), 0);
- const selected = accounts.find(a => a.id === selectedId);
- if (selected) return Number(selected.starting_balance || 0) > 0 ? Number(selected.starting_balance) : null;
- return funded > 0 ? funded : null;
-}
+type Account={id:string;name:string;currency:string};
 
 export default function Dashboard(){
  const router=useRouter();
  const [all,setAll]=useState<Trade[]>([]);
  const [accounts,setAccounts]=useState<Account[]>([]);
+ // Null until the ledger loads; `capitalByAccount` treats a missing table as "use opening balances".
+ const [flows,setFlows]=useState<CashFlow[]|null>(null);
  const [strategies,setStrategies]=useState<any[]>([]);
  const [tags,setTags]=useState<any[]>([]);
  const [filters,setFilters]=useState<Filters>({...emptyFilters});
  const [loading,setLoading]=useState(true);
  const [loadError,setLoadError]=useState<string|null>(null);
 
- useEffect(()=>{(async()=>{const s=createClient();const [tr,ac,st,tg]=await Promise.all([s.from("trades").select(`id,symbol,direction,entry_at,exit_at,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,${embedStrategy()},${embedAccount("name,starting_balance,currency")},trade_tags(tag_id)`).order("entry_at",{ascending:true}),s.from("trading_accounts").select("id,name,starting_balance,currency").order("name"),s.from("strategies").select("id,name").order("name"),s.from("tags").select("id,name").order("name")]);setLoadError(firstError(tr,ac,st,tg));setAll(((tr.data??[]) as any[]).map(normalizeTrade));setAccounts((ac.data??[]) as Account[]);setStrategies(st.data??[]);setTags(tg.data??[]);setLoading(false)})()},[]);
+ useEffect(()=>{(async()=>{const s=createClient();const [tr,ac,st,tg,f]=await Promise.all([s.from("trades").select(`id,symbol,direction,entry_at,exit_at,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,${embedStrategy()},${embedAccount("name,starting_balance,currency")},trade_tags(tag_id)`).order("entry_at",{ascending:true}),s.from("trading_accounts").select("id,name,currency,starting_balance").order("name"),s.from("strategies").select("id,name").order("name"),s.from("tags").select("id,name").order("name"),s.from("account_cash_flows").select("account_id,kind,amount")]);setLoadError(firstError(tr,ac,st,tg));setFlows(f.error?null:((f.data??[]) as CashFlow[]));setAll(((tr.data??[]) as any[]).map(normalizeTrade));setAccounts((ac.data??[]) as Account[]);setStrategies(st.data??[]);setTags(tg.data??[]);setLoading(false)})()},[]);
 
  const trades=useMemo(()=>applyFilters(all,filters) as Trade[],[all,filters]);
  const stats=useMemo(()=>calculateStats(trades),[trades]);
@@ -42,14 +36,16 @@ export default function Dashboard(){
  const selectedAccount=accounts.find(a=>a.id===filters.account);
  const currency=selectedAccount?.currency;
  // Current equity is a balance, so it is measured over every trade in the account. Adding a filtered
- // P&L to a starting balance would report "equity" with the filtered-out trades removed from it.
+ // P&L to the capital would report "equity" with the filtered-out trades removed from it.
  const accountTrades=useMemo(()=>selectedAccount?all.filter(t=>t.account_id===selectedAccount.id):[],[all,selectedAccount]);
  const accountSeries=useMemo(()=>metricSeries(accountTrades),[accountTrades]);
  const accountPnl=useMemo(()=>accountTrades.reduce((sum,t)=>sum+Number(t.net_pnl||0),0),[accountTrades]);
- const equity=selectedAccount?selectedAccount.starting_balance+accountPnl:null;
+ // Capital is what was deposited into the account, less what was taken out — not a typed-in number.
+ const capitalMap=useMemo(()=>capitalByAccount(accounts,flows),[accounts,flows]);
+ const equity=selectedAccount?(capitalMap[selectedAccount.id]?.net??0)+accountPnl:null;
  // A drawdown against a small early peak can read as thousands of percent, which says nothing. When
  // the capital behind the account is known, that is the base worth quoting instead.
- const capital=capitalBehind(accounts,filters.account);
+ const capital=capitalBehind(accounts,capitalMap,filters.account);
  const ddOnCapital=percentOf(stats.maxDrawdown,capital);
  const ddSub=ddOnCapital===null?`${stats.maxDrawdownPct.toFixed(1)}% of the P&L peak`:`${Math.abs(ddOnCapital).toFixed(1)}% of ${formatMoney(capital,currency)} capital`;
  const recent=[...trades].sort((a,b)=>b.entry_at.localeCompare(a.entry_at)).slice(0,8);

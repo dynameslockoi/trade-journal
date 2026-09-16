@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { BURSA_BOARD_LOT, SESSIONS, calculateGrossPnl, calculateRisk, formatMoney, formatR, localDatetimeToIso, numberOrNull, roundMoney, sessionBucket, sessionLabel, stripUnknownColumn, toLocalDatetimeInput } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
+import { ScreenshotInput } from "@/components/screenshot-input";
 import { LoadError, firstError } from "@/components/load-error";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Alert } from "@/components/ui/alert";
@@ -411,11 +412,7 @@ export default function EditTrade() {
             {shots.length ? (
               <div className="shot-grid">{shots.map(shot => <ScreenshotItem key={shot.id} shot={shot} onDelete={removeScreenshot} />)}</div>
             ) : <div className="muted">No screenshots attached.</div>}
-            <label className="upload-box block cursor-pointer">
-              Add screenshots
-              <input hidden type="file" accept="image/*" multiple onChange={e => setFiles(Array.from(e.target.files ?? []))} />
-              {files.length > 0 && <div className="mt-2 text-[var(--text)]">{files.length} new image(s) selected · max 10 MB each</div>}
-            </label>
+            <ScreenshotInput files={files} onChange={setFiles} />
           </CardContent>
         </Card>
 

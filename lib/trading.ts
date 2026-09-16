@@ -50,6 +50,68 @@ function firstEmbed<T>(value: T | T[] | null | undefined): T | null {
 export const embedStrategy = (cols = "name") => `strategies!trades_strategy_id_fkey(${cols})`;
 export const embedAccount = (cols = "name") => `trading_accounts!trades_account_id_fkey(${cols})`;
 
+/**
+ * One movement of money in or out of a trading account (`supabase/cashflow.sql`).
+ *
+ * Capital comes from these rows rather than from a single number on the account, so a top-up or a
+ * withdrawal of profits moves the equity the journal reports.
+ */
+export type CashFlow = {
+  account_id: string;
+  kind: "deposit" | "withdrawal";
+  amount: number | string;
+  occurred_on?: string | null;
+  note?: string | null;
+};
+
+export type CapitalTotals = { deposited: number; withdrawn: number; net: number };
+
+type AccountLike = { id: string; starting_balance?: number | string | null };
+
+/**
+ * Deposits minus withdrawals per account.
+ *
+ * `flows === null` means the ledger could not be read (the table is not in the database yet), and
+ * each account falls back to its opening balance so the pages keep showing the capital they always
+ * did instead of zeroing every percentage that divides by it.
+ */
+export function capitalByAccount(accounts: AccountLike[], flows: CashFlow[] | null): Record<string, CapitalTotals> {
+  const map: Record<string, CapitalTotals> = {};
+  const row = (id: string) => (map[id] ??= { deposited: 0, withdrawn: 0, net: 0 });
+
+  if (!flows) {
+    for (const a of accounts) {
+      const opening = Number(a.starting_balance ?? 0) || 0;
+      const t = row(a.id);
+      t.deposited = opening;
+      t.net = opening;
+    }
+    return map;
+  }
+
+  for (const f of flows) {
+    const t = row(f.account_id);
+    const amount = Number(f.amount ?? 0) || 0;
+    if (f.kind === "withdrawal") t.withdrawn += amount;
+    else t.deposited += amount;
+  }
+  for (const id of Object.keys(map)) map[id].net = map[id].deposited - map[id].withdrawn;
+  return map;
+}
+
+/**
+ * The capital behind a filter: the selected account's, or every account's together. Null when that
+ * comes to nothing, which is the signal to quote a percentage against something else.
+ */
+export function capitalBehind(accounts: AccountLike[], capital: Record<string, CapitalTotals>, selectedId?: string | null) {
+  if (selectedId) {
+    const net = capital[selectedId]?.net ?? 0;
+    return net > 0 ? net : null;
+  }
+  const funded = accounts.reduce((sum, a) => sum + (capital[a.id]?.net ?? 0), 0);
+  return funded > 0 ? funded : null;
+}
+
 /** Normalises raw Supabase rows into the `Trade` shape used across the UI. */
 export function normalizeTrade(row: any): Trade {
   return {

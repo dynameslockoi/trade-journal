@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { BURSA_BOARD_LOT, SESSIONS, calculateGrossPnl, calculateRisk, formatMoney, formatR, localDatetimeToIso, numberOrNull, roundMoney, sessionForTime, sessionLabel, stripUnknownColumn } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
+import { ScreenshotInput } from "@/components/screenshot-input";
 import { LoadError, firstError } from "@/components/load-error";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -428,11 +429,7 @@ export default function NewTrade() {
           <CardHeader><CardTitle>Notes &amp; Screenshots</CardTitle></CardHeader>
           <CardContent>
             <Textarea rows={7} placeholder="Why did you enter? What happened? What did you learn?" value={form.notes} onChange={e => set("notes", e.target.value)} />
-            <label className="upload-box block cursor-pointer">
-              📸 Add screenshots
-              <input type="file" accept="image/*" multiple hidden onChange={e => setFiles(Array.from(e.target.files ?? []))} />
-              <div className="muted text-[11px] mt-1.5">{files.length ? `${files.length} file(s) selected` : "PNG, JPG, WEBP"}</div>
-            </label>
+            <ScreenshotInput files={files} onChange={setFiles} />
           </CardContent>
         </Card>
 

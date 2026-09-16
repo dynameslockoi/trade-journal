@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  capitalBehind,
+  capitalByAccount,
   dailySummaries,
   dayKey,
   embedAccount,
@@ -21,11 +23,13 @@ import {
   normalizeTrade,
   percentOf,
   roundMoney,
+  type CashFlow,
   type DaySummary,
   type Trade,
 } from "@/lib/trading";
 
 type Account = { id: string; name: string; starting_balance: number; currency: string };
+// Null means the cash-flow ledger is not in the database yet.
 
 const MONTHS = Array.from({ length: 12 }, (_, i) =>
   new Date(2024, i, 1).toLocaleString("en-MY", { month: "long" })
@@ -44,6 +48,7 @@ const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 
 export default function CalendarPage() {
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [flows, setFlows] = useState<CashFlow[] | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState<DaySummary | null>(null);
@@ -55,13 +60,15 @@ export default function CalendarPage() {
   useEffect(() => {
     (async () => {
       const s = createClient();
-      const [t, a] = await Promise.all([
+      const [t, a, f] = await Promise.all([
         s.from("trades")
           .select(`id,symbol,direction,entry_at,exit_at,entry_price,exit_price,position_size,gross_pnl,commission,swap,fees,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,${embedStrategy()},${embedAccount("name,currency")}`)
           .order("entry_at"),
         s.from("trading_accounts").select("id,name,starting_balance,currency").order("name"),
+        s.from("account_cash_flows").select("account_id,kind,amount"),
       ]);
       setLoadError(firstError(t, a));
+      setFlows(f.error ? null : ((f.data ?? []) as CashFlow[]));
       setTrades(((t.data ?? []) as any[]).map(normalizeTrade));
       setAccounts((a.data ?? []) as Account[]);
       setLoading(false);
@@ -70,11 +77,9 @@ export default function CalendarPage() {
 
   const days = useMemo(() => dailySummaries(trades), [trades]);
   const byDay = useMemo(() => new Map(days.map(d => [d.key, d])), [days]);
-  // Capital is what every account was funded with — the base a day's return is measured against.
-  const capital = useMemo(() => {
-    const funded = accounts.reduce((sum, a) => sum + Number(a.starting_balance || 0), 0);
-    return funded > 0 ? funded : null;
-  }, [accounts]);
+  // Capital is what was deposited less what was withdrawn — the base a day's return is measured
+  // against. `capitalByAccount` falls back to opening balances until the ledger exists.
+  const capital = useMemo(() => capitalBehind(accounts, capitalByAccount(accounts, flows)), [accounts, flows]);
   const currency = accounts[0]?.currency;
 
   const year = cursor.getFullYear();

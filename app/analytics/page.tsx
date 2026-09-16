@@ -10,9 +10,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CHART, axisProps, barCursor, gridProps, pnlColor, tooltipProps } from "@/components/chart-theme";
 import {
-  bestStreak, calculateStats, embedStrategy, formatMoney, holdingBucket, HOLDING_BUCKETS, HOUR_BUCKETS, hourBucket,
+  bestStreak, calculateStats, capitalBehind, capitalByAccount, embedStrategy, formatMoney, holdingBucket, HOLDING_BUCKETS, HOUR_BUCKETS, hourBucket,
   hourSession, LOTS_BUCKETS, lotsBucket, myParts, normalizeTrade, numberOrNull, QUALITY_BUCKETS,
-  percentOf, qualityBucket, SESSION_WINDOWS, type Trade,
+  percentOf, qualityBucket, SESSION_WINDOWS, type CashFlow, type Trade,
 } from "@/lib/trading";
 
 type GroupRow = { name: string; trades: number; pnl: number; wins: number; winRate: number; avg: number; order: number };
@@ -126,6 +126,8 @@ function PnlBars({ data, height = 280, currency, tickFontSize = 10, tickInterval
 export default function Analytics() {
   const [all, setAll] = useState<Trade[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  // Null means the cash-flow ledger is not in the database yet.
+  const [flows, setFlows] = useState<CashFlow[] | null>(null);
   const [strategies, setStrategies] = useState<any[]>([]);
   const [tags, setTags] = useState<any[]>([]);
   const [filters, setFilters] = useState<Filters>({ ...emptyFilters });
@@ -135,13 +137,15 @@ export default function Analytics() {
   useEffect(() => {
     (async () => {
       const s = createClient();
-      const [a, b, c, d] = await Promise.all([
+      const [a, b, c, d, e] = await Promise.all([
         s.from("trades").select(`id,symbol,direction,entry_at,exit_at,position_size,setup_quality,execution_quality,discipline,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,mae,mfe,${embedStrategy()},trade_tags(tag_id)`).order("entry_at"),
         s.from("trading_accounts").select("id,name,currency,starting_balance"),
         s.from("strategies").select("id,name"),
         s.from("tags").select("id,name"),
+        s.from("account_cash_flows").select("account_id,kind,amount"),
       ]);
       setLoadError(firstError(a, b, c, d));
+      setFlows(e.error ? null : ((e.data ?? []) as CashFlow[]));
       setAll(((a.data ?? []) as any[]).map(normalizeTrade));
       setAccounts(b.data ?? []);
       setStrategies(c.data ?? []);
@@ -176,14 +180,12 @@ export default function Analytics() {
   const hasR = stats.rCount > 0;
   const avgR = stats.avgR ?? 0;
   const perTrade = ts.length ? stats.pnl / ts.length : null;
-  // Same rule as the dashboard: quote the drawdown against the capital behind it when the starting
-  // balances say what that is, rather than against a P&L peak that may be a few hundred ringgit.
-  const capital = (() => {
-    const selected = accounts.find(a => a.id === filters.account);
-    if (selected) return Number(selected.starting_balance || 0) > 0 ? Number(selected.starting_balance) : null;
-    const funded = accounts.reduce((sum, a) => sum + Number(a.starting_balance || 0), 0);
-    return funded > 0 ? funded : null;
-  })();
+  // Same rule as the dashboard: quote the drawdown against the capital behind it — deposits less
+  // withdrawals — rather than against a P&L peak that may be a few hundred ringgit.
+  const capital = useMemo(
+    () => capitalBehind(accounts, capitalByAccount(accounts, flows), filters.account),
+    [accounts, flows, filters.account]
+  );
   const ddOnCapital = percentOf(stats.maxDrawdown, capital);
   const ddSub = ddOnCapital === null
     ? `${stats.maxDrawdownPct.toFixed(1)}% of the P&L peak`
