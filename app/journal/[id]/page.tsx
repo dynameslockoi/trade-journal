@@ -12,6 +12,8 @@ import { ScreenshotGallery } from "@/components/screenshot-gallery";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { describeIpo, describeLeg, ipoTitle } from "@/lib/fees";
+import { KEYS } from "@/lib/data";
+import { invalidate } from "@/lib/query-cache";
 import { embedAccount, embedStrategy, formatDuration, formatLots, formatMoney, formatPrice, formatR, normalizeTrade, shortDateTime } from "@/lib/trading";
 
 export default function Detail() {
@@ -44,7 +46,11 @@ export default function Detail() {
     if (files?.length) await s.storage.from("trade-screenshots").remove(files.map((x: any) => x.storage_path));
     const { error } = await s.from("trades").delete().eq("id", id);
     if (error) toast.error(error.message);
-    else router.push("/journal");
+    else {
+      // A deleted trade must not linger in the journal's cached rows.
+      invalidate(KEYS.trades);
+      router.push("/journal");
+    }
   }
 
   if (loading) return <div className="content"><div className="muted">Loading…</div></div>;

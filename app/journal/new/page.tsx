@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import { KEYS } from "@/lib/data";
+import { invalidate } from "@/lib/query-cache";
 import { BURSA_SECTORS, SESSIONS, calculateGrossPnl, calculateRisk, formatLots, formatMoney, formatR, localDatetimeToIso, lotsToShares, numberOrNull, roundMoney, sessionForTime, sessionLabel, sharesToLots, stripUnknownColumn } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
 import { ScreenshotInput } from "@/components/screenshot-input";
@@ -254,6 +256,8 @@ export default function NewTrade() {
       }
     }
 
+    // The journal's cached rows no longer match the database.
+    invalidate(KEYS.trades);
     router.push(`/journal/${trade.id}`);
     setSaving(false);
   }

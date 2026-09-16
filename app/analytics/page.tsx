@@ -1,19 +1,21 @@
 "use client";
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { Fragment, useMemo, useState } from "react";
+import { KEYS, loadAccounts, loadFlows, loadStrategies, loadTags, loadTrades } from "@/lib/data";
+import { useCachedQuery } from "@/lib/query-cache";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { FilterBar, applyFilters, emptyFilters, type Filters } from "@/components/filter-bar";
 import { StatCard } from "@/components/stat-card";
 import { PageHeader } from "@/components/page-header";
-import { LoadError, firstError } from "@/components/load-error";
+import { LoadError } from "@/components/load-error";
+import { CardSkeleton, StatsSkeleton } from "@/components/skeletons";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CHART, axisProps, barCursor, gridProps, pnlColor, tooltipProps } from "@/components/chart-theme";
 import { SectorSentiment } from "@/components/sector-sentiment";
 import { toast } from "sonner";
 import {
-  bestStreak, calculateStats, capitalBehind, capitalByAccount, embedStrategy, formatMoney, holdingBucket, HOLDING_BUCKETS, HOUR_BUCKETS, hourBucket,
-  hourSession, LOTS_BUCKETS, lotsBucket, myParts, normalizeTrade, numberOrNull, QUALITY_BUCKETS,
+  bestStreak, calculateStats, capitalBehind, capitalByAccount, formatMoney, holdingBucket, HOLDING_BUCKETS, HOUR_BUCKETS, hourBucket,
+  hourSession, LOTS_BUCKETS, lotsBucket, myParts, numberOrNull, QUALITY_BUCKETS,
   percentOf, qualityBucket, SECTOR_UNSET, sectorOf, SESSION_WINDOWS, type CashFlow, type Trade,
 } from "@/lib/trading";
 
@@ -140,40 +142,21 @@ function PnlBars({ data, height = 280, currency, tickFontSize = 10, tickInterval
 }
 
 export default function Analytics() {
-  const [all, setAll] = useState<Trade[]>([]);
-  const [accounts, setAccounts] = useState<any[]>([]);
-  // Null means the cash-flow ledger is not in the database yet.
-  const [flows, setFlows] = useState<CashFlow[] | null>(null);
-  const [strategies, setStrategies] = useState<any[]>([]);
-  const [tags, setTags] = useState<any[]>([]);
+  // Shared with the dashboard and the journal: the charts and the table read the same rows.
+  const tradesQ = useCachedQuery<Trade[]>(KEYS.trades, loadTrades);
+  const accountsQ = useCachedQuery<any[]>(KEYS.accounts, loadAccounts);
+  const strategiesQ = useCachedQuery<any[]>(KEYS.strategies, loadStrategies);
+  const tagsQ = useCachedQuery<any[]>(KEYS.tags, loadTags);
+  const flowsQ = useCachedQuery<any[]>(KEYS.flows, loadFlows);
+  const all = tradesQ.data ?? [];
+  const accounts = accountsQ.data ?? [];
+  const strategies = strategiesQ.data ?? [];
+  const tags = tagsQ.data ?? [];
+  // An unreadable ledger is not a broken page: the capital line falls back to opening balances.
+  const flows = (flowsQ.error ? null : flowsQ.data) as CashFlow[] | null;
   const [filters, setFilters] = useState<Filters>({ ...emptyFilters });
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      const s = createClient();
-      // `sector` arrives with supabase/sectors.sql; without it the charts still draw, with every
-      // trade unclassified.
-      const TRADE_COLUMNS = `id,symbol,direction,entry_at,exit_at,position_size,setup_quality,execution_quality,discipline,is_ipo,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,mae,mfe,${embedStrategy()},trade_tags(tag_id)`;
-      const WITH_SECTOR = TRADE_COLUMNS.replace("id,", "id,sector,");
-      const [b, c, d, e] = await Promise.all([
-        s.from("trading_accounts").select("id,name,currency,starting_balance"),
-        s.from("strategies").select("id,name"),
-        s.from("tags").select("id,name"),
-        s.from("account_cash_flows").select("account_id,kind,amount"),
-      ]);
-      let a = await s.from("trades").select(WITH_SECTOR).order("entry_at");
-      if (a.error) a = await s.from("trades").select(TRADE_COLUMNS).order("entry_at");
-      setLoadError(firstError(a, b, c, d));
-      setFlows(e.error ? null : ((e.data ?? []) as CashFlow[]));
-      setAll(((a.data ?? []) as any[]).map(normalizeTrade));
-      setAccounts(b.data ?? []);
-      setStrategies(c.data ?? []);
-      setTags(d.data ?? []);
-      setLoading(false);
-    })();
-  }, []);
+  const loading = tradesQ.loading || accountsQ.loading || flowsQ.loading;
+  const loadError = tradesQ.error ?? accountsQ.error ?? strategiesQ.error ?? tagsQ.error;
 
   const ts = useMemo(() => applyFilters(all, filters) as Trade[], [all, filters]);
   // Money follows the filtered account's currency, falling back to the journal default (RM).
@@ -219,7 +202,7 @@ export default function Analytics() {
       <PageHeader title="Analytics" subtitle="Measure where your edge actually comes from." />
       <LoadError message={loadError} />
       <FilterBar filters={filters} setFilters={setFilters} accounts={accounts} strategies={strategies} tags={tags} />
-      {loadError ? null : loading ? <Card><CardContent>Loading analytics…</CardContent></Card> : <>
+      {loadError ? null : loading ? <><StatsSkeleton rows={2} /><CardSkeleton lines={6} /></> : <>
         <div className="grid four">
           <StatCard label="Net P&L" value={formatMoney(stats.pnl, currency, true)} positive={stats.pnl >= 0} />
           <StatCard label="Win Rate" value={`${stats.winRate.toFixed(1)}%`} />

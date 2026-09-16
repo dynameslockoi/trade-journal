@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { LogOut, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { clear } from "@/lib/query-cache";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -12,6 +13,8 @@ import { Button } from "@/components/ui/button";
 export function UserMenu({ email, name }: { email: string; name?: string }) {
   async function signout() {
     await createClient().auth.signOut();
+    // The cached rows belong to the session that just ended.
+    clear();
     window.location.href = "/login";
   }
   const label = name?.trim() || email || "Account settings";

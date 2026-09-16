@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, SquarePen } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { KEYS, loadAccounts, loadStrategies, loadTags, loadTrades } from "@/lib/data";
+import { invalidate, useCachedQuery } from "@/lib/query-cache";
 import { FilterBar, emptyFilters, applyFilters, type Filters } from "@/components/filter-bar";
 import { SectorManager } from "@/components/sector-manager";
 import { PageHeader } from "@/components/page-header";
-import { LoadError, firstError } from "@/components/load-error";
+import { LoadError } from "@/components/load-error";
+import { TableSkeleton } from "@/components/skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
@@ -20,45 +22,24 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { embedAccount, embedStrategy, formatMoney, formatR, normalizeTrade, shortDateTime, type Trade } from "@/lib/trading";
+import { formatMoney, formatR, shortDateTime, type Trade } from "@/lib/trading";
 
 export default function Journal() {
-  const [r, setR] = useState<Trade[]>([]);
-  const [accounts, setAccounts] = useState<any[]>([]);
-  const [strategies, setStrategies] = useState<any[]>([]);
-  const [tags, setTags] = useState<any[]>([]);
+  // The same rows the dashboard and the analytics already hold, so opening the journal costs no
+  // query at all once the app has been walked through once.
+  const tradesQ = useCachedQuery<Trade[]>(KEYS.trades, loadTrades);
+  const accountsQ = useCachedQuery<any[]>(KEYS.accounts, loadAccounts);
+  const strategiesQ = useCachedQuery<any[]>(KEYS.strategies, loadStrategies);
+  const tagsQ = useCachedQuery<any[]>(KEYS.tags, loadTags);
   const [f, setF] = useState<Filters>(emptyFilters);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const router = useRouter();
 
-  const load = useCallback(async () => {
-    const s = createClient();
-    const COLUMNS = `symbol,direction,entry_at,exit_at,net_pnl,r_multiple,session,account_id,strategy_id,${embedStrategy()},${embedAccount()},trade_tags(tag_id)`;
-    // `sector` arrives with supabase/sectors.sql and `is_ipo` with the Phase 9 block, and the journal
-    // must list trades on a database that has neither — so the select steps down through the columns
-    // that may not exist yet rather than showing an error in place of the journal.
-    const SELECTS = [
-      `id,is_ipo,sector,${COLUMNS}`,
-      `id,is_ipo,${COLUMNS}`,
-      `id,${COLUMNS}`,
-    ];
-    const [b, c, d] = await Promise.all([
-      s.from("trading_accounts").select("id,name,currency"),
-      s.from("strategies").select("id,name"),
-      s.from("tags").select("id,name"),
-    ]);
-    let a = await s.from("trades").select(SELECTS[0]).order("entry_at", { ascending: false });
-    for (let i = 1; i < SELECTS.length && a.error; i++) {
-      a = await s.from("trades").select(SELECTS[i]).order("entry_at", { ascending: false });
-    }
-    setLoadError(firstError(a, b, c, d));
-    setR((a.data ?? []).map(normalizeTrade) as Trade[]);
-    setAccounts(b.data ?? []);
-    setStrategies(c.data ?? []);
-    setTags(d.data ?? []);
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+  const r = tradesQ.data ?? [];
+  const accounts = accountsQ.data ?? [];
+  const strategies = strategiesQ.data ?? [];
+  const tags = tagsQ.data ?? [];
+  const loadError = tradesQ.error ?? accountsQ.error ?? strategiesQ.error ?? tagsQ.error;
+  const loading = tradesQ.loading;
 
   // The calendar's "View in Journal" links here with a date range, so land pre-filtered on that day.
   useEffect(() => {
@@ -166,7 +147,7 @@ export default function Journal() {
       title="Trade Journal"
       subtitle={`${rows.length} matching trade${rows.length === 1 ? "" : "s"}`}
       actions={<>
-        <SectorManager trades={r} onSaved={load} />
+        <SectorManager trades={r} onSaved={() => invalidate(KEYS.trades)} />
         <Button onClick={() => router.push("/journal/new")}>+ Add Trade</Button>
       </>}
     />
@@ -174,7 +155,7 @@ export default function Journal() {
     <FilterBar filters={f} setFilters={setF} accounts={accounts} strategies={strategies} tags={tags} />
     {/* A failed load leaves the table saying "No trades match these filters", which reads as an
         empty journal rather than an unreadable one — the banner above says it instead. */}
-    {loadError?null:<div className="card">
+    {loadError?null:loading?<TableSkeleton/>:<div className="card">
       <div className="card-content">
         <DataTable
           columns={columns}

@@ -288,6 +288,33 @@ permissions policy, HSTS) are applied by Next itself.
 
 ---
 
+## Why the pages change instantly
+
+Every page reads the same handful of row sets — trades, accounts, strategies, tags, cash flows, zakat —
+so the app fetches each one **once** and keeps it, rather than re-querying on every page you open. Three
+parts make that work, and they are worth knowing about before touching a page's data loading:
+
+- **`lib/data.ts`** holds one loader per row set and the cache keys for them. Pages call
+  `useCachedQuery(KEYS.trades, loadTrades)` and get `{ data, error, loading }`; they do not build their own
+  queries. This is also what lets the journal, the dashboard and the analytics share one copy of the same
+  trades — and why a loader that throws is better than one that returns `[]`: a failed read has to look
+  like a failure, not like an empty journal.
+- **`lib/query-cache.ts`** is the store: a minute of freshness, one request per key at a time, and a
+  background refresh that keeps the previous rows on screen. **A write calls `invalidate(...)`** for what
+  it changed — that is the whole invalidation story, and it is why a saved trade appears in the journal
+  without a reload. It marks the rows stale instead of dropping them, so the journal does not lose your
+  column choices and search while the fresh rows travel.
+- **The shell warms the rest.** After the page on screen has settled, `warmData()` fetches the shared row
+  sets on an idle callback, so the first click on a page you have not opened yet costs nothing either.
+
+Two server-side details matter for the same reason: the middleware and the root layout check the session
+with `getClaims()` (the session's JWT is verified against the project's cached signing keys) instead of
+`getUser()` (a request to the auth server), and the layout reads your display name from the token rather
+than querying `profiles` on every navigation. The chart library is a dynamic import, so the dashboard
+paints its cards and trades before the few hundred kilobytes of charting code arrive.
+
+---
+
 ## Checks
 
 `npm test` runs two hand-worked check scripts, both of which exist because a plausible wrong number is
@@ -315,6 +342,8 @@ components/               shared UI: shell, sidebar, filter bar, stat cards, spa
                           screenshots (input + gallery), sector tools, quick add, IPO fieldset
 components/ui/            shadcn/ui primitives on Radix + Tailwind
 lib/
+  data.ts                 one cached loader per row set, plus the cache keys
+  query-cache.ts          the client cache: TTL, de-duped requests, invalidation
   fees.ts                 the Bursa cost model and the IPO subscription model
   trading.ts              trade types, filters, stats, grouping, dates, zakat
   dates.ts                Malaysian-time helpers

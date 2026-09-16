@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { KEYS, loadDailyReview, loadWeeklyReview } from "@/lib/data";
+import { invalidate, readCached } from "@/lib/query-cache";
 import { PageHeader } from "@/components/page-header";
 import { LoadError } from "@/components/load-error";
 import { dayKey, myParts } from "@/lib/trading";
@@ -35,13 +37,14 @@ export default function Reviews() {
 
   useEffect(() => {
     (async () => {
-      const s = createClient();
+      // Cached per date, so stepping back to a day already opened is instant — and a save invalidates
+      // the key it wrote, so the copy in the cache cannot outlive an edit.
       const [a, b] = await Promise.all([
-        s.from("daily_reviews").select("*").eq("review_date", d).maybeSingle(),
-        s.from("weekly_reviews").select("*").eq("week_start", w).maybeSingle(),
+        readCached(KEYS.dailyReview(d), () => loadDailyReview(d)),
+        readCached(KEYS.weeklyReview(w), () => loadWeeklyReview(w)),
       ]);
       // Without this a failed read looks like an empty review and the next save would overwrite one.
-      setLoadError(a.error?.message ?? b.error?.message ?? null);
+      setLoadError(a.error ?? b.error ?? null);
       if (a.data) setDaily(a.data);
       if (b.data) setWeekly(b.data);
     })();
@@ -53,7 +56,10 @@ export default function Reviews() {
     if (!user) return;
     const { error } = await s.from(table).upsert({ user_id: user.id, ...payload }, { onConflict: table === "daily_reviews" ? "user_id,review_date" : "user_id,week_start" });
     if (error) toast.error(error.message);
-    else toast.success("Saved successfully.");
+    else {
+      invalidate(table === "daily_reviews" ? KEYS.dailyReview(d) : KEYS.weeklyReview(w));
+      toast.success("Saved successfully.");
+    }
   };
 
   return <div className="content">

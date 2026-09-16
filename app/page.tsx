@@ -1,34 +1,55 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { KEYS, loadAccounts, loadFlows, loadStrategies, loadTags, loadTrades } from "@/lib/data";
+import { useCachedQuery } from "@/lib/query-cache";
 import { FilterBar, applyFilters, emptyFilters, type Filters } from "@/components/filter-bar";
-import { EquityChart } from "@/components/equity-chart";
-import { LoadError, firstError } from "@/components/load-error";
+import { Skeleton } from "@/components/ui/skeleton";
+import { LoadError } from "@/components/load-error";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { calculateStats, capitalBehind, capitalByAccount, embedAccount, embedStrategy, formatMoney, formatR, metricSeries, normalizeTrade, percentOf, shortDate, type CashFlow, type Trade } from "@/lib/trading";
+import { calculateStats, capitalBehind, capitalByAccount, formatMoney, formatR, metricSeries, percentOf, shortDate, type CashFlow, type Trade } from "@/lib/trading";
+
+/**
+ * The chart library is the largest thing the dashboard loads — a few hundred kilobytes for one area
+ * chart. Imported statically it has to arrive before the first paint, so the metrics wait on it. As a
+ * dynamic import it becomes its own chunk: the cards and the recent trades render immediately and the
+ * curve fades in when its code lands.
+ */
+const EquityChart = dynamic(() => import("@/components/equity-chart").then(m => m.EquityChart), {
+  ssr: false,
+  loading: () => <Skeleton className="h-[310px] w-full" />,
+});
 
 type Account={id:string;name:string;currency:string};
 
 export default function Dashboard(){
  const router=useRouter();
- const [all,setAll]=useState<Trade[]>([]);
- const [accounts,setAccounts]=useState<Account[]>([]);
- // Null until the ledger loads; `capitalByAccount` treats a missing table as "use opening balances".
- const [flows,setFlows]=useState<CashFlow[]|null>(null);
- const [strategies,setStrategies]=useState<any[]>([]);
- const [tags,setTags]=useState<any[]>([]);
+ // Every row set comes from the shared cache, so returning to the dashboard is instant and only the
+ // first visit of the session waits on a query.
+ const tradesQ=useCachedQuery<Trade[]>(KEYS.trades,loadTrades);
+ const accountsQ=useCachedQuery<any[]>(KEYS.accounts,loadAccounts);
+ const strategiesQ=useCachedQuery<any[]>(KEYS.strategies,loadStrategies);
+ const tagsQ=useCachedQuery<any[]>(KEYS.tags,loadTags);
+ const flowsQ=useCachedQuery<any[]>(KEYS.flows,loadFlows);
+ const all=tradesQ.data??[];
+ const accounts=(accountsQ.data??[]) as Account[];
+ const strategies=strategiesQ.data??[];
+ const tags=tagsQ.data??[];
+ // A missing ledger is an expected state, not a page failure — `capitalByAccount` then falls back to
+ // the accounts' opening balances.
+ const flows=(flowsQ.error?null:flowsQ.data) as CashFlow[]|null;
  const [filters,setFilters]=useState<Filters>({...emptyFilters});
- const [loading,setLoading]=useState(true);
- const [loadError,setLoadError]=useState<string|null>(null);
-
- useEffect(()=>{(async()=>{const s=createClient();const [tr,ac,st,tg,f]=await Promise.all([s.from("trades").select(`id,symbol,direction,entry_at,exit_at,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,${embedStrategy()},${embedAccount("name,starting_balance,currency")},trade_tags(tag_id)`).order("entry_at",{ascending:true}),s.from("trading_accounts").select("id,name,currency,starting_balance").order("name"),s.from("strategies").select("id,name").order("name"),s.from("tags").select("id,name").order("name"),s.from("account_cash_flows").select("account_id,kind,amount")]);setLoadError(firstError(tr,ac,st,tg));setFlows(f.error?null:((f.data??[]) as CashFlow[]));setAll(((tr.data??[]) as any[]).map(normalizeTrade));setAccounts((ac.data??[]) as Account[]);setStrategies(st.data??[]);setTags(tg.data??[]);setLoading(false)})()},[]);
+ // Held until every dataset the cards read has settled, so equity cannot paint from opening balances
+ // and then jump to the ledger's figure.
+ const loading=tradesQ.loading||accountsQ.loading||flowsQ.loading;
+ const loadError=tradesQ.error??accountsQ.error??strategiesQ.error??tagsQ.error;
 
  const trades=useMemo(()=>applyFilters(all,filters) as Trade[],[all,filters]);
  const stats=useMemo(()=>calculateStats(trades),[trades]);

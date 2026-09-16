@@ -2,8 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { KEYS, loadTrades, loadZakat } from "@/lib/data";
+import { invalidate, useCachedQuery } from "@/lib/query-cache";
 import { PageHeader } from "@/components/page-header";
-import { LoadError, firstError } from "@/components/load-error";
+import { LoadError } from "@/components/load-error";
+import { CardSkeleton, StatsSkeleton } from "@/components/skeletons";
 import { StatCard } from "@/components/stat-card";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Alert } from "@/components/ui/alert";
@@ -16,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  dayKey, formatMoney, normalizeTrade, roundMoney, tradeYear, tradeYears, zakatForYear, ZAKAT_BASES,
+  dayKey, formatMoney, roundMoney, tradeYear, tradeYears, zakatForYear, ZAKAT_BASES,
   ZAKAT_RATE_DEFAULT, type Trade, type ZakatBasis,
 } from "@/lib/trading";
 
@@ -41,37 +44,26 @@ type Payment = {
 const today = () => dayKey(new Date());
 
 export default function ZakatPage() {
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [yearRows, setYearRows] = useState<YearRow[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
+  // Trades come from the shared cache — the zakat page needs only their dates and P&L, which every
+  // other page has already fetched.
+  const tradesQ = useCachedQuery<Trade[]>(KEYS.trades, loadTrades);
+  const zakatQ = useCachedQuery<{ years: any[]; payments: any[]; needsSchema: boolean }>(KEYS.zakat, loadZakat);
+  const trades = tradesQ.data ?? [];
+  const yearRows = (zakatQ.data?.years ?? []) as YearRow[];
+  const payments = (zakatQ.data?.payments ?? []) as Payment[];
   const [year, setYear] = useState(new Date().getFullYear());
-  const [needsSchema, setNeedsSchema] = useState(false);
-  const [loading, setLoading] = useState(true);
+  // A missing zakat table is its own message (needsSchema); it also shows up the moment a write fails.
+  const [schemaMissing, setSchemaMissing] = useState(false);
+  const needsSchema = schemaMissing || Boolean(zakatQ.data?.needsSchema);
+  const loading = tradesQ.loading || zakatQ.loading;
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadError = tradesQ.error;
 
   // The editable copy of the selected year's settings; saved to zakat_years on demand.
   const [draft, setDraft] = useState({ rate: String(ZAKAT_RATE_DEFAULT), basis: "net" as ZakatBasis, other: "", manual: "", nisab: "" });
   const [pay, setPay] = useState({ paid_on: today(), amount: "", method: "Zakat fitrah/income", note: "" });
 
-  useEffect(() => { (async () => {
-    const s = createClient();
-    const [t, y, p] = await Promise.all([
-      s.from("trades").select("id,symbol,direction,entry_at,exit_at,net_pnl").order("entry_at"),
-      s.from("zakat_years").select("*"),
-      s.from("zakat_payments").select("*").order("paid_on", { ascending: false }),
-    ]);
-    // A missing zakat table is its own message (needsSchema); any other failure is a load error.
-    setLoadError(t.error?.message ?? null);
-    setTrades(((t.data ?? []) as any[]).map(normalizeTrade));
-    if (y.error || p.error) setNeedsSchema(true);
-    else {
-      setYearRows((y.data ?? []) as YearRow[]);
-      setPayments((p.data ?? []) as Payment[]);
-    }
-    setLoading(false);
-  })(); }, []);
 
   const years = useMemo(() => tradeYears(trades), [trades]);
   const yearTrades = useMemo(() => trades.filter(t => tradeYear(t.entry_at) === year), [trades, year]);
@@ -139,9 +131,8 @@ export default function ZakatPage() {
       nisab: draft.nisab === "" ? null : Number(draft.nisab),
     };
     const { error } = await s.from("zakat_years").upsert(payload, { onConflict: "user_id,year" });
-    if (error) { setNeedsSchema(true); setErr(error.message); return; }
-    const { data } = await s.from("zakat_years").select("*");
-    setYearRows((data ?? []) as YearRow[]);
+    if (error) { setSchemaMissing(true); setErr(error.message); return; }
+    invalidate(KEYS.zakat);
     setMsg(`${year} settings saved.`);
     setTimeout(() => setMsg(""), 2500);
   }
@@ -161,9 +152,8 @@ export default function ZakatPage() {
       method: pay.method || null,
       note: pay.note || null,
     });
-    if (error) { setNeedsSchema(true); setErr(error.message); return; }
-    const { data } = await s.from("zakat_payments").select("*").order("paid_on", { ascending: false });
-    setPayments((data ?? []) as Payment[]);
+    if (error) { setSchemaMissing(true); setErr(error.message); return; }
+    invalidate(KEYS.zakat);
     setPay({ paid_on: today(), amount: "", method: pay.method, note: "" });
     setMsg("Payment recorded.");
     setTimeout(() => setMsg(""), 2500);
@@ -173,7 +163,7 @@ export default function ZakatPage() {
     const s = createClient();
     const { error } = await s.from("zakat_payments").delete().eq("id", id);
     if (error) { setErr(error.message); return; }
-    setPayments(prev => prev.filter(p => p.id !== id));
+    invalidate(KEYS.zakat);
   }
 
   const basisHint = ZAKAT_BASES.find(b => b.id === draft.basis)?.hint;
@@ -210,7 +200,7 @@ export default function ZakatPage() {
         </Card>
       )}
 
-      {loadError ? null : loading ? <Card><CardContent>Loading…</CardContent></Card> : <>
+      {loadError ? null : loading ? <><StatsSkeleton count={3} /><CardSkeleton lines={6} /></> : <>
         {(msg || err) && <Alert variant={err ? "error" : "success"}>{err || msg}</Alert>}
 
         <div className="grid four">

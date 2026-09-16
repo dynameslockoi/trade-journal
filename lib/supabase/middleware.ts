@@ -20,7 +20,11 @@ export async function updateSession(request: NextRequest) {
       }
     }
   );
-  const { data: { user } } = await supabase.auth.getUser();
+  // `getClaims` reads the session from the cookie and verifies its JWT against the project's signing
+  // keys, which are cached in memory — so the check costs no round trip. `getUser` asks the auth
+  // server every time, and this runs on every request, including every client-side navigation.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims ? { id: data.claims.sub } : null;
   const path = request.nextUrl.pathname;
   const protectedPath = path === "/" ||
     ["/journal","/analytics","/calendar","/accounts","/strategies","/tags","/reviews","/zakat","/settings"]

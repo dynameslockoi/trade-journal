@@ -30,14 +30,24 @@ export default async function RootLayout({children}:{children:React.ReactNode}) 
     );
   }
 
-  const supabase=await createClient(); const {data:{user}}=await supabase.auth.getUser();
-  // Optional: the profile row supplies the display name the topbar greets you with.
-  const {data:profile}=user?await supabase.from("profiles").select("display_name").eq("id",user.id).maybeSingle():{data:null};
+  const supabase=await createClient();
+  // The layout re-renders on every navigation, so its work is on the critical path of every page.
+  // `getClaims` checks the session against the cached signing keys rather than calling the auth
+  // server, and the display name comes out of the token's own metadata — which is where the settings
+  // page writes it. The profile row is only read for an account whose name was saved before the
+  // metadata was kept in sync, so the common case is one call and no database query at all.
+  const {data:claimsData}=await supabase.auth.getClaims();
+  const claims=claimsData?.claims as {sub?:string;email?:string;user_metadata?:{display_name?:unknown}}|undefined;
+  let name=typeof claims?.user_metadata?.display_name==="string"?claims.user_metadata.display_name:undefined;
+  if(claims?.sub&&!name){
+    const {data:profile}=await supabase.from("profiles").select("display_name").eq("id",claims.sub).maybeSingle();
+    name=profile?.display_name??undefined;
+  }
   return (
     <html lang="en" className={inter.variable} suppressHydrationWarning>
       <body>
         <ThemeProvider>
-          <AppShell email={user?.email??""} name={profile?.display_name??undefined}>{children}</AppShell>
+          <AppShell email={claims?.email??""} name={name}>{children}</AppShell>
         </ThemeProvider>
       </body>
     </html>

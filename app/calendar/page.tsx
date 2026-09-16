@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { KEYS, loadAccounts, loadFlows, loadTrades } from "@/lib/data";
+import { useCachedQuery } from "@/lib/query-cache";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
-import { LoadError, firstError } from "@/components/load-error";
+import { LoadError } from "@/components/load-error";
+import { CardSkeleton, StatsSkeleton } from "@/components/skeletons";
 import { StatCard } from "@/components/stat-card";
 import { CalendarDayModal } from "@/components/calendar-day-modal";
 import { Button } from "@/components/ui/button";
@@ -16,11 +18,8 @@ import {
   capitalByAccount,
   dailySummaries,
   dayKey,
-  embedAccount,
-  embedStrategy,
   formatMoney,
   formatPercent,
-  normalizeTrade,
   percentOf,
   roundMoney,
   type CashFlow,
@@ -47,33 +46,19 @@ const moneyParts = (value: unknown, currency?: string | null) => {
 const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 
 export default function CalendarPage() {
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [flows, setFlows] = useState<CashFlow[] | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  // The same cached rows every other page reads.
+  const tradesQ = useCachedQuery<Trade[]>(KEYS.trades, loadTrades);
+  const accountsQ = useCachedQuery<any[]>(KEYS.accounts, loadAccounts);
+  const flowsQ = useCachedQuery<any[]>(KEYS.flows, loadFlows);
+  const trades = tradesQ.data ?? [];
+  const accounts = (accountsQ.data ?? []) as Account[];
+  const flows = (flowsQ.error ? null : flowsQ.data) as CashFlow[] | null;
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState<DaySummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const loading = tradesQ.loading || accountsQ.loading || flowsQ.loading;
+  const loadError = tradesQ.error ?? accountsQ.error;
   // So a click in the year strip below can bring the month it opens back into view.
   const monthCard = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    (async () => {
-      const s = createClient();
-      const [t, a, f] = await Promise.all([
-        s.from("trades")
-          .select(`id,symbol,direction,entry_at,exit_at,entry_price,exit_price,position_size,gross_pnl,commission,swap,fees,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,${embedStrategy()},${embedAccount("name,currency")}`)
-          .order("entry_at"),
-        s.from("trading_accounts").select("id,name,starting_balance,currency").order("name"),
-        s.from("account_cash_flows").select("account_id,kind,amount"),
-      ]);
-      setLoadError(firstError(t, a));
-      setFlows(f.error ? null : ((f.data ?? []) as CashFlow[]));
-      setTrades(((t.data ?? []) as any[]).map(normalizeTrade));
-      setAccounts((a.data ?? []) as Account[]);
-      setLoading(false);
-    })();
-  }, []);
 
   const days = useMemo(() => dailySummaries(trades), [trades]);
   const byDay = useMemo(() => new Map(days.map(d => [d.key, d])), [days]);
@@ -144,7 +129,7 @@ export default function CalendarPage() {
       actions={<Button variant="secondary" onClick={today}>Today</Button>}
     />
     <LoadError message={loadError} what="your calendar" />
-    {loadError ? null : loading ? <Card><CardContent>Loading calendar…</CardContent></Card> : <>
+    {loadError ? null : loading ? <><StatsSkeleton /><CardSkeleton lines={8} /></> : <>
       <div className="grid four">
         <StatCard label="Month P&L" value={formatMoney(monthPnl, currency, true)} positive={monthPnl >= 0}
           sub={monthPct === null ? "No starting capital set" : `${formatPercent(monthPct)} of capital`} />

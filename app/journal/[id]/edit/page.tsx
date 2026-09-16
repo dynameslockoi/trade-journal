@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { KEYS } from "@/lib/data";
+import { invalidate } from "@/lib/query-cache";
 import { BURSA_SECTORS, SESSIONS, calculateGrossPnl, calculateRisk, formatLots, formatMoney, formatR, localDatetimeToIso, lotsToShares, numberOrNull, roundMoney, sessionBucket, sessionLabel, sharesToLots, stripUnknownColumn, toLocalDatetimeInput } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
 import { ScreenshotInput } from "@/components/screenshot-input";
@@ -319,6 +321,8 @@ export default function EditTrade() {
         }
       }
     }
+    // The journal, the dashboard and the analytics all hold this trade in the cache.
+    invalidate(KEYS.trades);
     router.push(`/journal/${id}`);
   }
 

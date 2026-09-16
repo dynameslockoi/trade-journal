@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+// Aliased: the page's own `loadStrategies`/`loadTags` below are the "after a write" refreshes.
+import { KEYS, loadStrategies as fetchStrategies, loadTags as fetchTags } from "@/lib/data";
+import { invalidate, useCachedQuery } from "@/lib/query-cache";
 import { PageHeader } from "@/components/page-header";
 import { ConfirmButton } from "@/components/confirm-button";
 import { LoadError } from "@/components/load-error";
@@ -35,33 +38,26 @@ const TAG_HINTS: Record<string, string> = {
  * owns its own controls, and the lists are independent: one page, two jobs.
  */
 export default function StrategiesAndTags() {
-  const [strategies, setStrategies] = useState<Strategy[]>([]);
-  const [tags, setTags] = useState<Tag[]>([]);
+  // Cached like the rest: the forms that tag a trade read the same two lists.
+  const strategiesQ = useCachedQuery<any[]>(KEYS.strategies, fetchStrategies);
+  const tagsQ = useCachedQuery<any[]>(KEYS.tags, fetchTags);
+  const strategies = (strategiesQ.data ?? []) as Strategy[];
+  const tags = (tagsQ.data ?? []) as Tag[];
+  const loadError = strategiesQ.error ?? tagsQ.error;
+  const loading = strategiesQ.loading || tagsQ.loading;
   const [tab, setTab] = useState("strategies");
   const [open, setOpen] = useState(false);
   // The id being edited, or null when the form is creating a new strategy.
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState(blank);
   const [error, setError] = useState("");
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [tagName, setTagName] = useState("");
   const [tagCategory, setTagCategory] = useState<string>("setup");
   const formCard = useRef<HTMLDivElement>(null);
 
-  const loadStrategies = async () => {
-    const { data, error } = await createClient().from("strategies").select("*").order("name");
-    if (error) setLoadError(error.message);
-    setStrategies((data ?? []) as Strategy[]);
-  };
-  const loadTags = async () => {
-    const { data, error } = await createClient().from("tags").select("*").order("category").order("name");
-    if (error) setLoadError(error.message);
-    setTags((data ?? []) as Tag[]);
-  };
-  useEffect(() => {
-    loadStrategies();
-    loadTags();
-  }, []);
+  /** After a write: re-read the list that changed rather than the page. */
+  const loadStrategies = () => invalidate(KEYS.strategies);
+  const loadTags = () => invalidate(KEYS.tags);
   // Opening the form (new or edit) brings it into view, since it sits above the cards.
   useEffect(() => {
     if (open) formCard.current?.scrollIntoView({ behavior: "smooth", block: "start" });

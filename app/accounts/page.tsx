@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { KEYS, loadAccounts, loadFlows, loadTrades } from "@/lib/data";
+import { invalidate, useCachedQuery } from "@/lib/query-cache";
 import { capitalByAccount, dayKey, formatMoney, type CashFlow } from "@/lib/trading";
 import { dateLabel } from "@/lib/dates";
 import { BROKER_PRESETS, DEFAULT_BROKER_ID, brokerPreset } from "@/lib/fees";
 import { PageHeader } from "@/components/page-header";
 import { ConfirmButton } from "@/components/confirm-button";
-import { LoadError, firstError } from "@/components/load-error";
+import { LoadError } from "@/components/load-error";
+import { StatsSkeleton } from "@/components/skeletons";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,17 +31,12 @@ const initial = { name: "", account_type: "personal", currency: "MYR", broker: D
 const emptyEntry = { amount: "", occurred_on: "", note: "" };
 
 export default function Accounts() {
-  const [items, setItems] = useState<Account[]>([]);
-  const [trades, setTrades] = useState<Trade[]>([]);
-  // Null means the ledger could not be read: supabase/cashflow.sql has not been run yet.
-  const [flows, setFlows] = useState<CashFlow[] | null>(null);
   const [open, setOpen] = useState(false);
   // The id being edited, or null when the form is creating a new account.
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState(initial);
   const [error, setError] = useState("");
-  // Separate from the form's own error: a failed list load is a page-level problem, not a field one.
-  const [loadError, setLoadError] = useState<string | null>(null);
+
   // The account a deposit/withdrawal is being recorded against.
   const [moving, setMoving] = useState<{ account: Account; kind: Kind } | null>(null);
   // The account whose ledger is open in the movements dialog.
@@ -46,21 +44,24 @@ export default function Accounts() {
   const [entry, setEntry] = useState(emptyEntry);
   const [savingMove, setSavingMove] = useState(false);
 
-  async function load() {
-    const s = createClient();
-    const [a, t, f] = await Promise.all([
-      s.from("trading_accounts").select("*").order("created_at", { ascending: false }),
-      s.from("trades").select("account_id,net_pnl"),
-      s.from("account_cash_flows").select("id,account_id,kind,amount,occurred_on,note").order("occurred_on", { ascending: false }).order("created_at", { ascending: false }),
-    ]);
-    // A missing ledger table is an expected state, not a page failure, so it is not folded into
-    // `loadError` — the page falls back to opening balances and says what to run.
-    setLoadError(firstError(a, t));
-    setItems((a.data ?? []) as Account[]);
-    setTrades((t.data ?? []) as Trade[]);
-    setFlows(f.error ? null : ((f.data ?? []) as CashFlow[]));
-  }
-  useEffect(() => { load(); }, []);
+  // The cached row sets. A write marks them stale rather than clearing them, so the cards keep their
+  // figures while the reload travels instead of blanking and rebuilding.
+  const accountsQ = useCachedQuery<any[]>(KEYS.accounts, loadAccounts);
+  const tradesQ = useCachedQuery<any[]>(KEYS.trades, loadTrades);
+  const flowsQ = useCachedQuery<any[]>(KEYS.flows, loadFlows);
+  const items = (accountsQ.data ?? []) as Account[];
+  const trades = (tradesQ.data ?? []) as Trade[];
+  // A missing ledger table is an expected state, not a page failure, so it is not folded into
+  // `loadError` — the page falls back to opening balances and says what to run.
+  const flows = (flowsQ.error ? null : flowsQ.data) as CashFlow[] | null;
+
+  /** After a write: the accounts and the ledger both moved. */
+  const load = () => { invalidate(KEYS.accounts); invalidate(KEYS.flows); };
+  // A failed list load is a page-level problem, not a field one.
+  const loadError = accountsQ.error ?? tradesQ.error;
+  const loading = accountsQ.loading || tradesQ.loading || flowsQ.loading;
+  // Newest account first, which is how the list read before the rows moved into the shared cache.
+  const newest = useMemo(() => [...items].sort((a: any, b: any) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""))), [items]);
 
   const pnlBy = useMemo(
     () => trades.reduce<Record<string, number>>((m, t) => { if (t.account_id) m[t.account_id] = (m[t.account_id] || 0) + Number(t.net_pnl || 0); return m; }, {}),
@@ -263,8 +264,8 @@ export default function Accounts() {
         </Card>
       )}
 
-      <div className="grid three">
-        {items.map(a => {
+      {loading ? <StatsSkeleton count={3} /> : <div className="grid three">
+        {newest.map(a => {
           const pnl = pnlBy[a.id] || 0;
           const t = totals(a.id);
           const equity = t.net + pnl;
@@ -343,8 +344,8 @@ export default function Accounts() {
             </Card>
           );
         })}
-      </div>
-      {!items.length && <Card><CardContent className="empty">No accounts yet. Add your first trading account.</CardContent></Card>}
+      </div>}
+      {!loading && !newest.length && <Card><CardContent className="empty">No accounts yet. Add your first trading account.</CardContent></Card>}
 
       {listing && (() => {
         const movements = movementsBy[listing.id] ?? [];
