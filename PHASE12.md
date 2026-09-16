@@ -152,6 +152,15 @@ windows, numbers are positive where positive means something, a trade cannot clo
 symbols and free text have length caps, zakat rates are 0–100 and years are plausible. Plus composite
 indexes matching how the journal actually reads (`user_id, account_id, entry_at desc` and friends).
 
+**One consequence worth knowing about the composite keys.** Adding a `(id, user_id)` foreign key
+alongside the plain single-column one gives PostgREST *two* candidate relationships between `trades`
+and each of `strategies` and `trading_accounts`, and it refuses to choose (PGRST201: *"Could not embed
+because more than one relationship was found"*). The moment the SQL was applied, every page that loads
+trades began failing with exactly that message. Rather than let each of the five queries carry a
+constraint name, `embedStrategy()` and `embedAccount()` in `lib/trading.ts` hold them, and the SQL
+carries a note pointing back at them. The hints name the *plain* constraints, which exist whether or
+not the hardening script has been run — so the app now works in both states.
+
 ---
 
 ## Not what it claimed

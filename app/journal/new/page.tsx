@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { BURSA_BOARD_LOT, SESSIONS, calculateGrossPnl, calculateRisk, formatMoney, formatR, localDatetimeToIso, numberOrNull, roundMoney, sessionForTime, sessionLabel, stripUnknownColumn } from "@/lib/trading";
@@ -32,12 +32,15 @@ const localNow = () => {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 };
 
+// `entry_at` and `session` are filled in on mount instead of here: a clock read at module scope runs
+// once on the server and again in the browser, and the two differ by the time the page took to
+// arrive — which React reports as a hydration mismatch (the rendered "2:28 pm" against "2:32 pm").
 const init = {
   symbol: "", account_id: "", strategy_id: "", asset_class: "shares",
-  entry_at: localNow(), exit_at: "",
+  entry_at: "", exit_at: "",
   entry_price: "", exit_price: "", position_size: "", stop_loss: "", take_profit: "",
   gross_pnl: "0", commission: "0", swap: "0", fees: "0", risk_amount: "", risk_percent: "",
-  session: sessionForTime(localNow()), emotion: "Calm", mistake: "No mistake", is_ipo: false,
+  emotion: "Calm", mistake: "No mistake", is_ipo: false,
   setup_quality: "8", execution_quality: "8", discipline: "8", mae: "", mfe: "", notes: "",
 };
 
@@ -59,8 +62,10 @@ export default function NewTrade() {
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  // Until the user picks a session themselves, it follows the entry time.
-  const sessionPicked = useRef(false);
+  // Until the user picks a session themselves, it follows the entry time — derived rather than
+  // stored, because an empty session cannot be handed to the Select (Radix rejects "" as a value,
+  // and reports the value it was given as a change while it matches no option).
+  const [sessionPicked, setSessionPicked] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -78,11 +83,24 @@ export default function NewTrade() {
     })();
   }, []);
 
+  // A new trade defaults to "now", which only the browser knows — so it is set once after mount.
+  useEffect(() => {
+    const now = localNow();
+    setForm(x => ({ ...x, entry_at: now }));
+  }, []);
+
   const set = (k: string, v: string | boolean) => setForm(x => ({ ...x, [k]: v }));
 
   function changeEntryAt(value: string) {
-    setForm(x => ({ ...x, entry_at: value, session: sessionPicked.current ? x.session : sessionForTime(value) }));
+    setForm(x => ({ ...x, entry_at: value }));
   }
+
+  // Always a real session, so the picker's value always matches an option. Until the entry time is
+  // known (blank on the server) this reads as the morning session, which the mount effect then
+  // corrects from the actual entry time.
+  // `||`, not `??`: the Select reports an empty string as a change while its value matches no
+  // option, and only a real session should stop the field following the entry time.
+  const session = sessionPicked || sessionForTime(form.entry_at);
   const preset = brokerPreset(broker);
   const assetClass = SHARES;
   const parsedSst = sstOverride.trim() === "" ? null : Number(sstOverride) / 100;
@@ -152,6 +170,7 @@ export default function NewTrade() {
       symbol: form.symbol.trim().toUpperCase(),
       direction: "long",
       asset_class: assetClass,
+      session,
       entry_at: localDatetimeToIso(form.entry_at),
       exit_at: localDatetimeToIso(form.exit_at),
       gross_pnl: grossPnl,
@@ -340,7 +359,7 @@ export default function NewTrade() {
             <div className="grid three">
               <div className="form-field">
                 <Label htmlFor="nt-session">Session</Label>
-                <Select value={form.session} onValueChange={v => { sessionPicked.current = true; set("session", v); }}>
+                <Select value={session} onValueChange={v => v && setSessionPicked(v)}>
                   <SelectTrigger id="nt-session"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {SESSIONS.map(x => <SelectItem key={x} value={x}>{sessionLabel(x)}</SelectItem>)}

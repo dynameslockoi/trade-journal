@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { describeLeg } from "@/lib/fees";
-import { formatDuration, formatMoney, formatNumber, formatPrice, formatR, normalizeTrade, shortDateTime } from "@/lib/trading";
+import { embedAccount, embedStrategy, formatDuration, formatMoney, formatNumber, formatPrice, formatR, normalizeTrade, shortDateTime } from "@/lib/trading";
 
 export default function Detail() {
   const { id } = useParams<{ id: string }>();
@@ -25,7 +25,7 @@ export default function Detail() {
   useEffect(() => { (async () => {
     const s = createClient();
     const [a, b, c] = await Promise.all([
-      s.from("trades").select("*,strategies(name),trading_accounts(name,currency)").eq("id", id).single(),
+      s.from("trades").select(`*,${embedStrategy()},${embedAccount("name,currency")}`).eq("id", id).single(),
       s.from("trade_screenshots").select("*").eq("trade_id", id).order("created_at"),
       s.from("trade_tags").select("tags(name,category)").eq("trade_id", id),
     ]);

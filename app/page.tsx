@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { calculateStats, formatMoney, formatR, metricSeries, normalizeTrade, percentOf, shortDate, type Trade } from "@/lib/trading";
+import { calculateStats, embedAccount, embedStrategy, formatMoney, formatR, metricSeries, normalizeTrade, percentOf, shortDate, type Trade } from "@/lib/trading";
 
 type Account={id:string;name:string;starting_balance:number;currency:string};
 
@@ -34,7 +34,7 @@ export default function Dashboard(){
  const [loading,setLoading]=useState(true);
  const [loadError,setLoadError]=useState<string|null>(null);
 
- useEffect(()=>{(async()=>{const s=createClient();const [tr,ac,st,tg]=await Promise.all([s.from("trades").select("id,symbol,direction,entry_at,exit_at,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,strategies(name),trading_accounts(name,starting_balance,currency),trade_tags(tag_id)").order("entry_at",{ascending:true}),s.from("trading_accounts").select("id,name,starting_balance,currency").order("name"),s.from("strategies").select("id,name").order("name"),s.from("tags").select("id,name").order("name")]);setLoadError(firstError(tr,ac,st,tg));setAll(((tr.data??[]) as any[]).map(normalizeTrade));setAccounts((ac.data??[]) as Account[]);setStrategies(st.data??[]);setTags(tg.data??[]);setLoading(false)})()},[]);
+ useEffect(()=>{(async()=>{const s=createClient();const [tr,ac,st,tg]=await Promise.all([s.from("trades").select(`id,symbol,direction,entry_at,exit_at,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,${embedStrategy()},${embedAccount("name,starting_balance,currency")},trade_tags(tag_id)`).order("entry_at",{ascending:true}),s.from("trading_accounts").select("id,name,starting_balance,currency").order("name"),s.from("strategies").select("id,name").order("name"),s.from("tags").select("id,name").order("name")]);setLoadError(firstError(tr,ac,st,tg));setAll(((tr.data??[]) as any[]).map(normalizeTrade));setAccounts((ac.data??[]) as Account[]);setStrategies(st.data??[]);setTags(tg.data??[]);setLoading(false)})()},[]);
 
  const trades=useMemo(()=>applyFilters(all,filters) as Trade[],[all,filters]);
  const stats=useMemo(()=>calculateStats(trades),[trades]);

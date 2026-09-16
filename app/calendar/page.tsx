@@ -14,6 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   dailySummaries,
   dayKey,
+  embedAccount,
+  embedStrategy,
   formatMoney,
   formatPercent,
   normalizeTrade,
@@ -55,7 +57,7 @@ export default function CalendarPage() {
       const s = createClient();
       const [t, a] = await Promise.all([
         s.from("trades")
-          .select("id,symbol,direction,entry_at,exit_at,entry_price,exit_price,position_size,gross_pnl,commission,swap,fees,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,strategies(name),trading_accounts(name,currency)")
+          .select(`id,symbol,direction,entry_at,exit_at,entry_price,exit_price,position_size,gross_pnl,commission,swap,fees,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,${embedStrategy()},${embedAccount("name,currency")}`)
           .order("entry_at"),
         s.from("trading_accounts").select("id,name,starting_balance,currency").order("name"),
       ]);

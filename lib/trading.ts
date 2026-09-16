@@ -38,6 +38,18 @@ function firstEmbed<T>(value: T | T[] | null | undefined): T | null {
   return (value as T) ?? null;
 }
 
+/**
+ * The PostgREST embeds every trade query needs, kept in one place.
+ *
+ * `supabase/hardening.sql` adds composite `(id, user_id)` foreign keys beside the plain
+ * single-column ones, so a trade can never point at another user's account or strategy. That
+ * gives PostgREST **two** candidate relationships for both `strategies` and `trading_accounts`,
+ * and it refuses to guess (PGRST201) — so each embed names the constraint it means, the plain
+ * one. Rename those constraints in the SQL and these must be renamed to match.
+ */
+export const embedStrategy = (cols = "name") => `strategies!trades_strategy_id_fkey(${cols})`;
+export const embedAccount = (cols = "name") => `trading_accounts!trades_account_id_fkey(${cols})`;
+
 /** Normalises raw Supabase rows into the `Trade` shape used across the UI. */
 export function normalizeTrade(row: any): Trade {
   return {

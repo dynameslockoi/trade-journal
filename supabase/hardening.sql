@@ -44,6 +44,13 @@ alter table public.trades add constraint trades_strategy_same_owner
   foreign key (strategy_id, user_id) references public.strategies(id, user_id)
   on delete set null (strategy_id) not valid;
 
+-- NOTE: the two composite keys above give PostgREST a second candidate relationship for both
+-- `strategies` and `trading_accounts`, and it refuses to guess between them (PGRST201). Every
+-- embed in the app therefore names the plain constraint it means -- see `embedStrategy()` and
+-- `embedAccount()` in lib/trading.ts, which reference `trades_strategy_id_fkey` and
+-- `trades_account_id_fkey` by name. Renaming either of those two constraints means updating those
+-- helpers, or every page that lists trades stops loading.
+
 alter table public.trade_screenshots drop constraint if exists screenshots_same_owner;
 alter table public.trade_screenshots add constraint screenshots_same_owner
   foreign key (trade_id, user_id) references public.trades(id, user_id) on delete cascade not valid;

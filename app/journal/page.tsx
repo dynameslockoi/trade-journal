@@ -19,7 +19,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatMoney, formatR, normalizeTrade, shortDateTime, type Trade } from "@/lib/trading";
+import { embedAccount, embedStrategy, formatMoney, formatR, normalizeTrade, shortDateTime, type Trade } from "@/lib/trading";
 
 export default function Journal() {
   const [r, setR] = useState<Trade[]>([]);
@@ -32,7 +32,7 @@ export default function Journal() {
 
   useEffect(() => { (async () => {
     const s = createClient();
-    const COLUMNS = "symbol,direction,entry_at,exit_at,net_pnl,r_multiple,session,account_id,strategy_id,strategies(name),trading_accounts(name),trade_tags(tag_id)";
+    const COLUMNS = `symbol,direction,entry_at,exit_at,net_pnl,r_multiple,session,account_id,strategy_id,${embedStrategy()},${embedAccount()},trade_tags(tag_id)`;
     const [a0, b, c, d] = await Promise.all([
       s.from("trades").select(`id,is_ipo,${COLUMNS}`).order("entry_at", { ascending: false }),
       s.from("trading_accounts").select("id,name,currency"),

@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CHART, axisProps, barCursor, gridProps, pnlColor, tooltipProps } from "@/components/chart-theme";
 import {
-  bestStreak, calculateStats, formatMoney, holdingBucket, HOLDING_BUCKETS, HOUR_BUCKETS, hourBucket,
+  bestStreak, calculateStats, embedStrategy, formatMoney, holdingBucket, HOLDING_BUCKETS, HOUR_BUCKETS, hourBucket,
   hourSession, LOTS_BUCKETS, lotsBucket, myParts, normalizeTrade, numberOrNull, QUALITY_BUCKETS,
   percentOf, qualityBucket, SESSION_WINDOWS, type Trade,
 } from "@/lib/trading";
@@ -136,7 +136,7 @@ export default function Analytics() {
     (async () => {
       const s = createClient();
       const [a, b, c, d] = await Promise.all([
-        s.from("trades").select("id,symbol,direction,entry_at,exit_at,position_size,setup_quality,execution_quality,discipline,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,mae,mfe,strategies(name),trade_tags(tag_id)").order("entry_at"),
+        s.from("trades").select(`id,symbol,direction,entry_at,exit_at,position_size,setup_quality,execution_quality,discipline,net_pnl,r_multiple,risk_amount,session,account_id,strategy_id,mae,mfe,${embedStrategy()},trade_tags(tag_id)`).order("entry_at"),
         s.from("trading_accounts").select("id,name,currency,starting_balance"),
         s.from("strategies").select("id,name"),
         s.from("tags").select("id,name"),
