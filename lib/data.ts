@@ -1,8 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { embedAccount, embedStrategy, normalizeTrade, type Trade } from "@/lib/trading";
-import { preload } from "@/lib/query-cache";
+import { embedStrategy, normalizeTrade, type Trade } from "@/lib/trading";
+import { preload, useCachedQuery } from "@/lib/query-cache";
 
 /**
  * One loader per dataset, shared by every page.
@@ -30,53 +31,62 @@ export const KEYS = {
   tags: "tags",
   flows: "flows",
   zakat: "zakat",
+  /** Which tags each trade carries — `{trade_id, tag_id}` pairs only, not full tag rows: this
+   *  exists purely so the Tag filter (see `applyFilters`) can match without every list page
+   *  carrying every trade's tags, which is what `TRADE_LIST_EMBEDS` deliberately leaves out. */
+  tradeTags: "tradeTags",
   dailyReview: (date: string) => `review:daily:${date}`,
   weeklyReview: (week: string) => `review:weekly:${week}`,
 };
 
 /**
- * The columns every page can need, in one list. It is a union rather than `*` because `sector` may not
- * exist on the database yet and dropping a name from a list is possible where dropping one from `*` is
- * not.
+ * The columns the *list/aggregate* pages need — Dashboard, Journal, Analytics, Calendar,
+ * Accounts and Zakat all read this one shared, cached array, and none of them opens a single
+ * trade's own detail (the P&L breakdown, notes, screenshots, exact prices, MAE/MFE, mistake,
+ * emotion…). Those live on `journal/[id]` and `journal/[id]/edit`, which already run their own
+ * `select("*")` for the one row they need — they were never reading from this cache, so trimming
+ * it here doesn't touch them. What's left is a union of exactly what `calculateStats`,
+ * `metricSeries`, `qualityBucket`, `lotsBucket`, `dailySummaries` and each page's own
+ * grouping/table columns use.
+ *
+ * The stored charge legs (`commission`, `swap`, `fees`) stay: the calendars' day breakdown adds
+ * them back up to separate a day's gross P&L from what the broker took, so dropping them does not
+ * fail loudly — it silently renders every day as free. `scripts/calc-check.mts` reads this array
+ * and asserts the fields the calculators read are still in it, so a trim that forgets one fails
+ * the checks instead of quietly changing a figure.
+ *
+ * It's a list rather than `*` because `sector` may not exist on the database yet and dropping a
+ * name from a list is possible where dropping one from `*` is not.
  */
-const TRADE_COLUMNS = [
+const TRADE_LIST_COLUMNS = [
   "id",
   "symbol",
-  "direction",
-  "asset_class",
   "entry_at",
   "exit_at",
-  "entry_price",
-  "exit_price",
+  "net_pnl",
+  "r_multiple",
   "position_size",
-  "stop_loss",
-  "take_profit",
-  "gross_pnl",
   "commission",
   "swap",
   "fees",
-  "fee_breakdown",
-  "net_pnl",
-  "r_multiple",
-  "risk_amount",
-  "risk_percent",
-  "session",
-  "emotion",
-  "mistake",
   "setup_quality",
   "execution_quality",
   "discipline",
-  "mae",
-  "mfe",
-  "notes",
+  "session",
   "is_ipo",
   "account_id",
   "strategy_id",
 ].join(",");
 
-const TRADE_EMBEDS = `${embedStrategy()},${embedAccount("name,starting_balance,currency")},trade_tags(tag_id)`;
-const WITH_SECTOR = `sector,${TRADE_COLUMNS},${TRADE_EMBEDS}`;
-const WITHOUT_SECTOR = `${TRADE_COLUMNS},${TRADE_EMBEDS}`;
+/**
+ * Only `strategies(name)` — not the account embed and not `trade_tags`. Every page here already
+ * has its own copy of accounts (`loadAccounts`), and no list page reads a trade's tags: the
+ * journal table doesn't show them and nothing filters by them, so the embed was fetched on every
+ * trade, on every page, for a value nothing ever read.
+ */
+const TRADE_LIST_EMBEDS = embedStrategy();
+const WITH_SECTOR = `sector,${TRADE_LIST_COLUMNS},${TRADE_LIST_EMBEDS}`;
+const WITHOUT_SECTOR = `${TRADE_LIST_COLUMNS},${TRADE_LIST_EMBEDS}`;
 
 /**
  * Whether `sector` is on this database, remembered for the session. Without the memo every page load
@@ -89,8 +99,12 @@ export async function loadTrades(): Promise<Trade[]> {
   const s = createClient();
   const columns = sectorColumn === false ? WITHOUT_SECTOR : WITH_SECTOR;
   let res = await s.from("trades").select(columns).order("entry_at", { ascending: true });
-  if (res.error && sectorColumn !== false) {
-    // supabase/sectors.sql has not been run: retry without the column so the journal still opens.
+  // Postgres' "undefined_column" — the one error that actually means `supabase/sectors.sql`
+  // hasn't been run. A network error, a timeout, an RLS/permission failure or a transient 500
+  // carries a different code (or none at all against a flaky connection) and must surface as a
+  // load error like any other failure, not get read as "this database doesn't have sectors" and
+  // silently and permanently switch every trade in the session to unsectored.
+  if (res.error?.code === "42703" && sectorColumn !== false) {
     sectorColumn = false;
     res = await s.from("trades").select(WITHOUT_SECTOR).order("entry_at", { ascending: true });
   } else if (!res.error) {
@@ -120,6 +134,37 @@ export async function loadTags(): Promise<any[]> {
   const { data, error } = await s.from("tags").select("*").order("category").order("name");
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+/**
+ * `{trade_id, tag_id}` for every tagged trade — the whole point of `KEYS.tradeTags` (see above).
+ * `useTradeTagsMap` below is how a page actually wants this; call that instead of this loader
+ * directly unless building a different shape of the same rows.
+ */
+export async function loadTradeTags(): Promise<{ trade_id: string; tag_id: string }[]> {
+  const s = createClient();
+  const { data, error } = await s.from("trade_tags").select("trade_id,tag_id");
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/**
+ * Trade id → the set of tag ids on it, for the Tag filter (`applyFilters` in filter-bar.tsx). A
+ * page calls this instead of reading `.trade_tags` off a trade: the shared trades cache doesn't
+ * carry that embed (see `TRADE_LIST_EMBEDS`), on purpose, since nothing else needs it.
+ */
+export function useTradeTagsMap(): { map: Map<string, Set<string>>; error: string | null; loading: boolean } {
+  const q = useCachedQuery<{ trade_id: string; tag_id: string }[]>(KEYS.tradeTags, loadTradeTags);
+  const map = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const row of q.data ?? []) {
+      const set = m.get(row.trade_id) ?? new Set<string>();
+      set.add(row.tag_id);
+      m.set(row.trade_id, set);
+    }
+    return m;
+  }, [q.data]);
+  return { map, error: q.error, loading: q.loading };
 }
 
 /**
@@ -180,6 +225,7 @@ export function warmData() {
   preload(KEYS.accounts, loadAccounts);
   preload(KEYS.strategies, loadStrategies);
   preload(KEYS.tags, loadTags);
+  preload(KEYS.tradeTags, loadTradeTags);
   preload(KEYS.flows, loadFlows);
   preload(KEYS.zakat, loadZakat);
 }

@@ -3,13 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { KEYS } from "@/lib/data";
-import { invalidate } from "@/lib/query-cache";
+import { KEYS, loadAccounts, loadStrategies, loadTags } from "@/lib/data";
+import { invalidate, readCached } from "@/lib/query-cache";
 import { BURSA_SECTORS, SESSIONS, calculateGrossPnl, calculateRisk, formatLots, formatMoney, formatR, localDatetimeToIso, lotsToShares, numberOrNull, roundMoney, sessionBucket, sessionLabel, sharesToLots, stripUnknownColumn, toLocalDatetimeInput } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
 import { ScreenshotInput } from "@/components/screenshot-input";
 import { ScreenshotGallery } from "@/components/screenshot-gallery";
-import { LoadError, firstError } from "@/components/load-error";
+import { LoadError } from "@/components/load-error";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -84,11 +84,15 @@ export default function EditTrade() {
   useEffect(() => {
     (async () => {
       const s = createClient();
+      // Accounts/strategies/tags go through the same cache Dashboard/Journal/Analytics already
+      // warmed (see AppShell's warm-up and lib/query-cache's `readCached`) — only the trade
+      // itself, its tags and its screenshots are genuinely specific to this one row and need a
+      // fresh request every time.
       const [t, a, st, tg, tt, sh] = await Promise.all([
         s.from("trades").select("*").eq("id", id).single(),
-        s.from("trading_accounts").select("*").order("name"),
-        s.from("strategies").select("id,name").order("name"),
-        s.from("tags").select("id,name,category").order("name"),
+        readCached<Account[]>(KEYS.accounts, loadAccounts),
+        readCached<any[]>(KEYS.strategies, loadStrategies),
+        readCached<Tag[]>(KEYS.tags, loadTags),
         s.from("trade_tags").select("tag_id").eq("trade_id", id),
         s.from("trade_screenshots").select("id,storage_path,kind,caption").eq("trade_id", id).order("created_at"),
       ]);
@@ -97,7 +101,7 @@ export default function EditTrade() {
       // Sessions are the two Bursa windows, so an older row's free-form value is normalised here.
       setForm({ ...row, entry_at: toLocalDatetimeInput(row.entry_at), exit_at: toLocalDatetimeInput(row.exit_at), session: sessionBucket(row.session, row.entry_at) });
       // The trade itself loaded; a failed list would still leave the pickers empty and unexplained.
-      setLoadError(firstError(a, st, tg));
+      setLoadError(a.error ?? st.error ?? tg.error);
       setAccounts((a.data ?? []) as Account[]);
       setStrategies(st.data ?? []);
       setTags((tg.data ?? []) as Tag[]);

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, SquarePen } from "lucide-react";
-import { KEYS, loadAccounts, loadStrategies, loadTags, loadTrades } from "@/lib/data";
+import { KEYS, loadAccounts, loadStrategies, loadTags, loadTrades, useTradeTagsMap } from "@/lib/data";
 import { invalidate, useCachedQuery } from "@/lib/query-cache";
 import { FilterBar, emptyFilters, applyFilters, type Filters } from "@/components/filter-bar";
 import { SectorManager } from "@/components/sector-manager";
@@ -24,6 +24,31 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { formatMoney, formatR, shortDateTime, type Trade } from "@/lib/trading";
 
+/**
+ * Row-id → position within a given displayed-row array, built once per array and reused.
+ *
+ * The sector column needs to know each row's neighbour in the *displayed* order to decide
+ * whether to repeat its name — see the `cell` below. `table.getRowModel()` is the current page
+ * after sorting, filtering and pagination — the rows actually on screen — so the row directly
+ * above in the DOM is genuinely `at - 1`; `getSortedRowModel()` would instead be every matching
+ * trade before pagination slices it, and the first row of page 2 would compare itself to the
+ * last row of page 1, which isn't on screen to read as a match. Asking for that with
+ * `.findIndex()` is one call per row rendered, each scanning up to the whole array, so a page of
+ * rows cost rows × rows comparisons — negligible at 50 trades, real work at several thousand.
+ * `getRowModel()` is memoized by TanStack Table (the same array reference comes back until
+ * sorting, filtering, pagination or data actually change), so keying off that reference here
+ * means the index map is built once per page, not once per cell.
+ */
+const sectorIndexCache = new WeakMap<readonly { id: string }[], Map<string, number>>();
+function indexOf(sortedRows: readonly { id: string }[], id: string): number {
+  let map = sectorIndexCache.get(sortedRows);
+  if (!map) {
+    map = new Map(sortedRows.map((r, i) => [r.id, i]));
+    sectorIndexCache.set(sortedRows, map);
+  }
+  return map.get(id) ?? -1;
+}
+
 export default function Journal() {
   // The same rows the dashboard and the analytics already hold, so opening the journal costs no
   // query at all once the app has been walked through once.
@@ -31,6 +56,7 @@ export default function Journal() {
   const accountsQ = useCachedQuery<any[]>(KEYS.accounts, loadAccounts);
   const strategiesQ = useCachedQuery<any[]>(KEYS.strategies, loadStrategies);
   const tagsQ = useCachedQuery<any[]>(KEYS.tags, loadTags);
+  const tradeTagsQ = useTradeTagsMap();
   const [f, setF] = useState<Filters>(emptyFilters);
   const router = useRouter();
 
@@ -38,7 +64,7 @@ export default function Journal() {
   const accounts = accountsQ.data ?? [];
   const strategies = strategiesQ.data ?? [];
   const tags = tagsQ.data ?? [];
-  const loadError = tradesQ.error ?? accountsQ.error ?? strategiesQ.error ?? tagsQ.error;
+  const loadError = tradesQ.error ?? accountsQ.error ?? strategiesQ.error ?? tagsQ.error ?? tradeTagsQ.error;
   const loading = tradesQ.loading;
 
   // The calendar's "View in Journal" links here with a date range, so land pre-filtered on that day.
@@ -49,7 +75,7 @@ export default function Journal() {
     if (from || to) setF(prev => ({ ...prev, from, to }));
   }, []);
 
-  const rows = useMemo(() => applyFilters(r, f), [r, f]);
+  const rows = useMemo(() => applyFilters(r, f, tradeTagsQ.map), [r, f, tradeTagsQ.map]);
   const currency = accounts.find(a => a.id === f.account)?.currency;
 
   const columns = useMemo<ColumnDef<Trade, any>[]>(() => [
@@ -79,8 +105,8 @@ export default function Journal() {
       cell: ({ row, table }) => {
         const sector = row.original.sector;
         if (!sector) return <span className="muted">—</span>;
-        const sorted = table.getSortedRowModel().rows;
-        const at = sorted.findIndex(r => r.id === row.id);
+        const sorted = table.getRowModel().rows;
+        const at = indexOf(sorted, row.id);
         const previous = at > 0 ? sorted[at - 1].original.sector : null;
         return <span className={previous === sector ? "sector-repeat" : "sector-chip"}>{sector}</span>;
       },
@@ -165,6 +191,7 @@ export default function Journal() {
           searchPlaceholder="Search symbol, sector, strategy or session…"
           pageSize={15}
           onRowClick={row => router.push(`/journal/${row.id}`)}
+          onRowHover={row => router.prefetch(`/journal/${row.id}`)}
           empty="No trades match these filters."
         />
       </div>

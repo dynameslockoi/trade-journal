@@ -23,6 +23,14 @@ const csp = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  /**
+   * The journal is served from a small VPS that also runs live media services, so the server
+   * has to fit in a few hundred megabytes. `standalone` is what makes that possible: Next
+   * traces the imports `server.js` actually reaches and emits only those files, instead of
+   * the full 525 MB `node_modules` tree, and the process is started directly rather than
+   * through the `next` CLI.
+   */
+  output: "standalone",
   async headers() {
     return [
       {

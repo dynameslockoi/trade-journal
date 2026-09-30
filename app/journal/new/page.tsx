@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
-import { KEYS } from "@/lib/data";
-import { invalidate } from "@/lib/query-cache";
+import { KEYS, loadAccounts, loadStrategies, loadTags } from "@/lib/data";
+import { invalidate, useCachedQuery } from "@/lib/query-cache";
 import { BURSA_SECTORS, SESSIONS, calculateGrossPnl, calculateRisk, formatLots, formatMoney, formatR, localDatetimeToIso, lotsToShares, numberOrNull, roundMoney, sessionForTime, sessionLabel, sharesToLots, stripUnknownColumn } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
 import { ScreenshotInput } from "@/components/screenshot-input";
-import { LoadError, firstError } from "@/components/load-error";
+import { LoadError } from "@/components/load-error";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,10 +53,16 @@ const money = (v: number | null) => formatMoney(v);
 
 export default function NewTrade() {
   const router = useRouter();
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [strategies, setStrategies] = useState<Strategy[]>([]);
-  const [tags, setTags] = useState<Tag[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // The shell's warm-up (see AppShell) has usually already fetched these by the time someone
+  // reaches "Add Trade" from the journal or dashboard, so this page opens with the pickers
+  // already populated instead of running its own accounts/strategies/tags query from cold.
+  const accountsQ = useCachedQuery<Account[]>(KEYS.accounts, loadAccounts);
+  const strategiesQ = useCachedQuery<Strategy[]>(KEYS.strategies, loadStrategies);
+  const tagsQ = useCachedQuery<Tag[]>(KEYS.tags, loadTags);
+  const accounts = accountsQ.data ?? [];
+  const strategies = strategiesQ.data ?? [];
+  const tags = tagsQ.data ?? [];
+  const loadError = accountsQ.error ?? strategiesQ.error ?? tagsQ.error;
   const [selected, setSelected] = useState<string[]>([]);
   const [form, setForm] = useState(init);
   const [broker, setBroker] = useState(DEFAULT_BROKER_ID);
@@ -75,22 +81,6 @@ export default function NewTrade() {
   const [sessionPicked, setSessionPicked] = useState<string | null>(null);
   // Where the sector came from, so the field can say so rather than looking like it was chosen.
   const [sectorFrom, setSectorFrom] = useState("");
-
-  useEffect(() => {
-    (async () => {
-      const s = createClient();
-      const [a, st, t] = await Promise.all([
-        s.from("trading_accounts").select("*").order("name"),
-        s.from("strategies").select("id,name").order("name"),
-        s.from("tags").select("id,name,category").order("name"),
-      ]);
-      // A failed list would leave the form with empty pickers and no explanation.
-      setLoadError(firstError(a, st, t));
-      setAccounts((a.data ?? []) as Account[]);
-      setStrategies((st.data ?? []) as Strategy[]);
-      setTags((t.data ?? []) as Tag[]);
-    })();
-  }, []);
 
   // A new trade defaults to "now", which only the browser knows — so it is set once after mount.
   useEffect(() => {

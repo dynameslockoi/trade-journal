@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { KEYS, loadAccounts, loadFlows, loadStrategies, loadTags, loadTrades } from "@/lib/data";
+import { KEYS, loadAccounts, loadFlows, loadStrategies, loadTags, loadTrades, useTradeTagsMap } from "@/lib/data";
 import { useCachedQuery } from "@/lib/query-cache";
 import { FilterBar, applyFilters, emptyFilters, type Filters } from "@/components/filter-bar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,6 +38,7 @@ export default function Dashboard(){
  const strategiesQ=useCachedQuery<any[]>(KEYS.strategies,loadStrategies);
  const tagsQ=useCachedQuery<any[]>(KEYS.tags,loadTags);
  const flowsQ=useCachedQuery<any[]>(KEYS.flows,loadFlows);
+ const tradeTagsQ=useTradeTagsMap();
  const all=tradesQ.data??[];
  const accounts=(accountsQ.data??[]) as Account[];
  const strategies=strategiesQ.data??[];
@@ -49,9 +50,9 @@ export default function Dashboard(){
  // Held until every dataset the cards read has settled, so equity cannot paint from opening balances
  // and then jump to the ledger's figure.
  const loading=tradesQ.loading||accountsQ.loading||flowsQ.loading;
- const loadError=tradesQ.error??accountsQ.error??strategiesQ.error??tagsQ.error;
+ const loadError=tradesQ.error??accountsQ.error??strategiesQ.error??tagsQ.error??tradeTagsQ.error;
 
- const trades=useMemo(()=>applyFilters(all,filters) as Trade[],[all,filters]);
+ const trades=useMemo(()=>applyFilters(all,filters,tradeTagsQ.map) as Trade[],[all,filters,tradeTagsQ.map]);
  const stats=useMemo(()=>calculateStats(trades),[trades]);
  const series=useMemo(()=>metricSeries(trades),[trades]);
  const selectedAccount=accounts.find(a=>a.id===filters.account);
@@ -115,7 +116,7 @@ export default function Dashboard(){
        <TableRow><TableHead>Date</TableHead><TableHead>Symbol</TableHead><TableHead>Strategy</TableHead><TableHead>P&L</TableHead><TableHead>R</TableHead></TableRow>
       </TableHeader>
       <TableBody>
-       {recent.map(t=><TableRow key={t.id} onClick={()=>router.push(`/journal/${t.id}`)} style={{cursor:"pointer"}}>
+       {recent.map(t=><TableRow key={t.id} onClick={()=>router.push(`/journal/${t.id}`)} onMouseEnter={()=>router.prefetch(`/journal/${t.id}`)} style={{cursor:"pointer"}}>
         <TableCell>{shortDate(t.entry_at)}</TableCell>
         <TableCell><b>{t.symbol}</b></TableCell>
         <TableCell>{t.strategies?.name||"—"}</TableCell>

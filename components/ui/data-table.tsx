@@ -53,6 +53,7 @@ export function DataTable<TData>({
   pageSize = 15,
   compact = false,
   onRowClick,
+  onRowHover,
   empty = "No rows match these filters.",
   toolbar,
   className,
@@ -67,6 +68,9 @@ export function DataTable<TData>({
   pageSize?: number;
   compact?: boolean;
   onRowClick?: (row: TData) => void;
+  /** Fired once when the pointer first enters a row — a cue to prefetch wherever the row leads,
+   *  not a hover-tracking callback (it does not fire again until the pointer leaves and returns). */
+  onRowHover?: (row: TData) => void;
   empty?: string;
   toolbar?: React.ReactNode;
   className?: string;
@@ -100,10 +104,15 @@ export function DataTable<TData>({
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     initialState: { pagination: { pageSize } },
-    // Every cell contributes to the search, so a symbol, a strategy or a date all match.
+    // `searchText` already builds one string with everything a caller wants matched (symbol,
+    // strategy, sector, session…) into the hidden `__search` column above, so a table that has
+    // one only needs to check that column — not re-derive the same text by re-stringifying every
+    // visible cell of every row on every keystroke. The all-cells scan is kept only as a fallback
+    // for the rare table with no `searchText` at all.
     globalFilterFn: (row, _columnId, value) => {
       const needle = String(value ?? "").trim().toLowerCase();
       if (!needle) return true;
+      if (searchText) return String(row.getValue(SEARCH_COLUMN) ?? "").toLowerCase().includes(needle);
       return row
         .getAllCells()
         .some(cell => String(cell.getValue() ?? "").toLowerCase().includes(needle));
@@ -240,6 +249,7 @@ export function DataTable<TData>({
               <TableRow
                 key={row.id}
                 onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                onMouseEnter={onRowHover ? () => onRowHover(row.original) : undefined}
                 tabIndex={onRowClick ? 0 : undefined}
                 onKeyDown={
                   onRowClick

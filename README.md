@@ -67,7 +67,7 @@ multiple, with a per-row menu for the things that act on a single trade. Columns
 **Columns** button and any sortable column sorts.
 
 **Filters** are collapsed by default — unhide them when you need them and they stay out of the way
-otherwise. Available: account, symbol, strategy, **sector**, session, direction, result
+otherwise. Available: account, symbol, strategy, **sector**, session, result
 (win/loss/breakeven), **IPO vs open market**, date range and tag. The text search covers symbol, sector,
 strategy and session. The **Sectors** button classifies whole symbols at once: pick a sector for a
 ticker and every trade of that ticker is updated in one write, which is how 200-odd historical trades get
@@ -429,7 +429,7 @@ paints its cards and trades before the few hundred kilobytes of charting code ar
 
 ## Checks
 
-`npm test` runs five check scripts, all of which exist because a plausible wrong number — or a rule that
+`npm test` runs six check scripts, all of which exist because a plausible wrong number — or a rule that
 quietly stopped applying — is worse than a crash:
 
 - **`scripts/fee-check.mts`** — the published broker schedules (M+ worked examples, Moomoo's platform
@@ -437,7 +437,10 @@ quietly stopped applying — is worse than a crash:
   for every channel including the financing formula and the cash-only case, and the split between the
   broker's charges and the market's.
 - **`scripts/calc-check.mts`** — gross P&L, risk, R formatting, percentages, holding-time buckets, and the
-  Malaysian-time day/month boundaries including leap Februaries.
+  Malaysian-time day/month boundaries including leap Februaries. It also reads `lib/data.ts` and asserts
+  the projection every page shares still carries each field the calculators read, so trimming that list
+  cannot silently turn a day's charges into zero; and it covers the date-range filter's Malaysian day
+  boundary.
 - **`scripts/admin-check.mts`** — the access rules: code normalising, generated codes, an inclusive end
   date, suspension outranking an end date, an admin that cannot be locked out, what a used, expired or
   switched-off code reads as, and the fortnight's warning window — its last day, the day it goes quiet
@@ -449,6 +452,10 @@ quietly stopped applying — is worse than a crash:
   weekend or in the future, exits never before their entry, an open position carrying no result, and the
   fee breakdown splitting the broker's side from the market's. A demo is the first thing a buyer sees, so
   a wrong number in it is the product disagreeing with itself in front of an audience.
+- **`scripts/cache-check.mts`** — the client cache's failure behaviour: a healthy key is fetched once, a
+  transient failure retries itself after the back-off with no navigation and no listener, a permanent one
+  (a missing function or table) is left alone, and an invalidation or a clear cancels a retry already
+  waiting. A cache that stopped retrying would not crash — it would just look like the journal went empty.
 - **`scripts/sql-check.mjs`** — runs `schema.sql`, `admin.sql`, `cashflow.sql`, `access.sql` and
   `create-user.sql` against a real Postgres (PGlite, in WASM) inside a fake Supabase environment, then
   tries to break in: sign up with no code, reuse a spent one, promote myself, extend my own access, read
@@ -485,9 +492,9 @@ lib/
   supabase/               browser, server and middleware clients
   utils.ts                cn()
 supabase/                 the SQL files to run, in order
-scripts/                  the check scripts (fees, calculations, access, demo, SQL)
+scripts/                  the check scripts (fees, calculations, access, demo, cache, SQL)
   demo-data.mts           generates the demo journal; `npm run demo:seed` / `demo:clear`
-middleware.ts             keeps the Supabase session fresh
+proxy.ts                  keeps the Supabase session fresh
 next.config.ts            security headers
 ```
 

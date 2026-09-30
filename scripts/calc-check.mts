@@ -7,6 +7,7 @@
  *
  *   npm run test:calc
  */
+import { readFileSync } from "node:fs";
 import {
   bestStreak,
   calculateGrossPnl,
@@ -20,6 +21,7 @@ import {
   formatR,
   holdingBucket,
   hourBucket,
+  inDayRange,
   localDatetimeToIso,
   lotsBucket,
   metricSeries,
@@ -167,6 +169,32 @@ check("second day starts from the first day's close", days[1].equityBefore, 100)
 check("a day's charges come from the stored legs", days[0].charges, 10);
 check("a day's gross is net plus charges", days[0].gross, 110);
 
+/* -------------------------------------- the cached projection behind the calculators */
+// `dailySummaries` and the stats read fields off the trades the shared cache hands them, and that
+// projection is a hand-kept list (`TRADE_LIST_COLUMNS` in lib/data.ts). A trim can drop a field the
+// calculators still read without failing anything that runs here — the calendar then reports every
+// day as free rather than erroring — so the list is read out of the source and checked against the
+// fields those functions actually need.
+const dataSource = readFileSync(new URL("../lib/data.ts", import.meta.url), "utf8");
+const columnsStart = dataSource.indexOf("const TRADE_LIST_COLUMNS = [");
+const columnsEnd = dataSource.indexOf('].join(",")', columnsStart);
+check("the projection list was found in lib/data.ts", columnsStart >= 0 && columnsEnd > columnsStart, "true");
+const projected = new Set(
+  [...dataSource.slice(columnsStart, columnsEnd).matchAll(/"([a-z_]+)"/g)].map(m => m[1]),
+);
+for (const column of [
+  // calculateStats and metricSeries
+  "id", "symbol", "entry_at", "exit_at", "net_pnl", "r_multiple", "position_size",
+  // qualityBucket and lotsBucket, and the pages' own grouping and tables
+  "setup_quality", "execution_quality", "discipline", "session", "is_ipo", "account_id", "strategy_id",
+  // dailySummaries: a day's gross is its net plus the stored legs, so a missing one reads as no fees
+  "commission", "swap", "fees",
+]) {
+  check(`the cached projection carries ${column}`, projected.has(column), "true");
+}
+// `sector` is prepended by the retry wrapper rather than named in the list itself.
+check("the cached projection carries sector", dataSource.includes("`sector,${TRADE_LIST_COLUMNS}"), "true");
+
 /* ----------------------------------------------------------------- bucket helpers */
 check("intraday hold", holdingBucket("2026-09-16T01:00:00Z", "2026-09-16T05:00:00Z"), "Intraday");
 check("two-day hold", holdingBucket("2026-09-16T01:00:00Z", "2026-09-18T01:00:00Z"), "1–3 days");
@@ -214,6 +242,21 @@ check("a 30-day month", monthBounds("2026-09").to, "2026-09-30");
 check("a 31-day month", monthBounds("2026-12").to, "2026-12-31");
 check("the first of a month", monthBounds("2026-09").from, "2026-09-01");
 // A trade with no sector is "Not set", never blank: it is a line in the table, not a missing row.
+/* ------------------------------------------------------------ the date-range filter */
+// A range arrives as two Malaysian calendar days (the calendar's own day keys), and the trade is
+// bucketed by its Malaysian day too. Comparing instants instead would file a trade after Malaysian
+// midnight under the previous day for anyone reading the journal from another timezone —
+// 2026-09-15T17:00:00Z is 01:00 on the 16th in Kuala Lumpur, the same rule `dayKey` follows.
+const edge = "2026-09-15T17:00:00Z";
+check("a trade after Malaysian midnight is that day", inDayRange(edge, "2026-09-16", "2026-09-16"), true);
+check("and not the day before", inDayRange(edge, "2026-09-15", "2026-09-15"), false);
+check("a day inside a month's range", inDayRange(edge, "2026-09-01", "2026-09-30"), true);
+check("a range that ends before the trade", inDayRange(edge, "2026-09-01", "2026-09-15"), false);
+check("an unbounded range keeps everything", inDayRange(edge, "", ""), true);
+check("an open start", inDayRange(edge, "", "2026-09-16"), true);
+check("an open end", inDayRange(edge, "2026-09-16", ""), true);
+check("no date is outside any range", inDayRange("not a date", "2026-09-01", "2026-09-30"), false);
+
 check("no sector reads as not set", sectorOf({ sector: null }), SECTOR_UNSET);
 check("a blank sector reads as not set", sectorOf({ sector: "   " }), SECTOR_UNSET);
 check("a sector is kept as written", sectorOf({ sector: "Technology" }), "Technology");

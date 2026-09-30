@@ -39,7 +39,17 @@ const DEFAULT_TTL = 60_000;
  * request loop against an endpoint that is not going to change its answer. Five seconds is short
  * enough that a dropped connection recovers on its own and long enough that it is not a loop.
  */
-const RETRY_AFTER = 5_000;
+const DEFAULT_RETRY_AFTER = 5_000;
+
+/**
+ * The live back-off, so a check can exercise the retry without waiting five seconds. Production
+ * code never moves it.
+ */
+let retryAfterMs = DEFAULT_RETRY_AFTER;
+
+export function setRetryAfterMs(ms: number) {
+  retryAfterMs = ms;
+}
 
 /**
  * Throw this from a loader when asking again cannot help — the function or table is not in the
@@ -60,6 +70,9 @@ type Entry = {
   promise?: Promise<void>;
   /** When this failed key may be asked again. Absent while it is healthy. */
   retryAt?: number;
+  /** What the key was last fetched with, so a failed key can be asked again on its own. */
+  fetcher?: () => Promise<unknown>;
+  ttl?: number;
 };
 
 const store = new Map<string, Entry>();
@@ -68,8 +81,43 @@ const listeners = new Map<string, Set<() => void>>();
 const tokens = new Map<string, number>();
 let seq = 0;
 
+/** A pending re-fetch per failed key, so a failure recovers without waiting for a navigation. */
+const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 function notify(key: string) {
   listeners.get(key)?.forEach(fn => fn());
+}
+
+/** Drop a pending retry — the key is being fetched, refreshed or forgotten anyway. */
+function clearRetry(key: string) {
+  const timer = retryTimers.get(key);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  retryTimers.delete(key);
+}
+
+/**
+ * Ask a failed key again after the back-off, without waiting for a caller.
+ *
+ * Failing only reports the error and notifies the listeners once; the component that was waiting then
+ * re-runs its effect, finds the back-off still running and settles. So without this an open page
+ * stays on its error until the user navigates or reloads, even when the connection is back a second
+ * later. The timer re-runs the fetch through `ensure` with the fetcher the key was last asked with,
+ * so a background warm-up recovers too, and it is dropped if anything refreshed or cleared the key
+ * first.
+ */
+function scheduleRetry(key: string) {
+  clearRetry(key);
+  const timer = setTimeout(() => {
+    retryTimers.delete(key);
+    const entry = store.get(key);
+    // The failure is no longer held, or the key was answered in the meantime.
+    if (!entry?.error || !entry.fetcher) return;
+    void ensure(key, entry.fetcher, entry.ttl ?? DEFAULT_TTL);
+  }, retryAfterMs);
+  // A pending retry must not hold the process open (a server render, or the check script).
+  (timer as { unref?: () => void }).unref?.();
+  retryTimers.set(key, timer);
 }
 
 /** A snapshot of what is held for a key, in the shape the hook renders. */
@@ -106,6 +154,8 @@ export function invalidate(prefix = "") {
     if (prefix && !key.startsWith(prefix)) continue;
     const entry = store.get(key);
     if (!entry) continue;
+    // The write is the retry: a pending one would only fetch the same rows twice.
+    clearRetry(key);
     // Dropping the in-flight marker lets a request that is already running be superseded: without it
     // the write's fresh read would share the request that left before the write. The back-off goes
     // with it, so the invalidation after a write is also the retry — which is what the admin page's
@@ -118,6 +168,7 @@ export function invalidate(prefix = "") {
 
 /** Drop every cached answer. Signing out is the one moment the rows must not be kept at all. */
 export function clear() {
+  for (const key of [...retryTimers.keys()]) clearRetry(key);
   const keys = [...store.keys()];
   store.clear();
   tokens.clear();
@@ -133,9 +184,12 @@ function ensure<T>(key: string, fetcher: () => Promise<T>, ttl: number): Promise
   const existing = store.get(key);
   if (existing?.promise) return existing.promise;
   // Inside the back-off window this is a no-op: no request, and no notification either, so the
-  // listener that called it settles instead of asking again.
+  // listener that called it settles instead of asking again. `scheduleRetry` is what asks again once
+  // the window has passed.
   if (existing?.error && existing.retryAt && Date.now() < existing.retryAt) return Promise.resolve();
 
+  // A real fetch supersedes any retry that was waiting on this key.
+  clearRetry(key);
   const token = ++seq;
   tokens.set(key, token);
 
@@ -151,13 +205,19 @@ function ensure<T>(key: string, fetcher: () => Promise<T>, ttl: number): Promise
       if (tokens.get(key) !== token) return;
       const held = store.get(key);
       const message = e instanceof Error ? e.message : String(e);
+      const permanent = e instanceof PermanentError;
       // `at: 0` marks a failure: present for the error message, stale on purpose.
+      // The fetcher rides along so the retry below can run without a component asking again.
       store.set(key, {
         data: held?.data ?? null,
         at: 0,
         error: message,
-        retryAt: e instanceof PermanentError ? Number.POSITIVE_INFINITY : Date.now() + RETRY_AFTER,
+        retryAt: permanent ? Number.POSITIVE_INFINITY : Date.now() + retryAfterMs,
+        fetcher: fetcher as () => Promise<unknown>,
+        ttl,
       });
+      // A missing function or table will keep saying no, so only a transient failure is retried.
+      if (!permanent) scheduleRetry(key);
     })
     .finally(() => {
       const held = store.get(key);
@@ -165,7 +225,14 @@ function ensure<T>(key: string, fetcher: () => Promise<T>, ttl: number): Promise
       notify(key);
     });
 
-  store.set(key, { data: existing?.data ?? null, at: existing?.at ?? 0, error: existing?.error ?? null, promise });
+  store.set(key, {
+    data: existing?.data ?? null,
+    at: existing?.at ?? 0,
+    error: existing?.error ?? null,
+    promise,
+    fetcher: fetcher as () => Promise<unknown>,
+    ttl,
+  });
   return promise;
 }
 

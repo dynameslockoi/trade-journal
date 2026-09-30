@@ -1,18 +1,35 @@
 "use client";
 import { Fragment, useMemo, useState } from "react";
-import { KEYS, loadAccounts, loadFlows, loadStrategies, loadTags, loadTrades } from "@/lib/data";
+import dynamic from "next/dynamic";
+import { KEYS, loadAccounts, loadFlows, loadStrategies, loadTags, loadTrades, useTradeTagsMap } from "@/lib/data";
 import { useCachedQuery } from "@/lib/query-cache";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { FilterBar, applyFilters, emptyFilters, type Filters } from "@/components/filter-bar";
 import { StatCard } from "@/components/stat-card";
 import { PageHeader } from "@/components/page-header";
 import { LoadError } from "@/components/load-error";
 import { CardSkeleton, StatsSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CHART, axisProps, barCursor, gridProps, pnlColor, tooltipProps } from "@/components/chart-theme";
 import { SectorSentiment } from "@/components/sector-sentiment";
 import { toast } from "sonner";
+
+/**
+ * Ten charts, one library, loaded once — as its own chunk. See the doc comment in
+ * `components/analytics-charts.tsx` for why this page in particular needs the split.
+ */
+const PnlBars = dynamic(() => import("@/components/analytics-charts").then(m => m.PnlBars), {
+  ssr: false,
+  loading: () => <Skeleton className="mt-2.5 h-[280px] w-full" />,
+});
+const AnalyticsEquityCurve = dynamic(() => import("@/components/analytics-charts").then(m => m.AnalyticsEquityCurve), {
+  ssr: false,
+  loading: () => <Skeleton className="mt-2.5 h-[300px] w-full" />,
+});
+const RDistributionChart = dynamic(() => import("@/components/analytics-charts").then(m => m.RDistributionChart), {
+  ssr: false,
+  loading: () => <Skeleton className="mt-2.5 h-[300px] w-full" />,
+});
 import {
   bestStreak, calculateStats, capitalBehind, capitalByAccount, formatMoney, holdingBucket, HOLDING_BUCKETS, HOUR_BUCKETS, hourBucket,
   hourSession, LOTS_BUCKETS, lotsBucket, myParts, numberOrNull, QUALITY_BUCKETS,
@@ -105,42 +122,6 @@ function grouped(ts: Trade[], key: GroupKey): GroupRow[] {
       : a.order - b.order);
 }
 
-/** Bar chart of P&L per group, green for profit and red for loss. */
-function PnlBars({ data, height = 280, currency, tickFontSize = 10, tickInterval }: {
-  data: { name: string; pnl: number; trades?: number }[];
-  height?: number;
-  currency?: string | null;
-  /** Banded labels ("9–10 / 10") are wider than strategy names, so they render smaller. */
-  tickFontSize?: number;
-  /** Set 0 to label every band; by default recharts drops the ones it cannot fit. */
-  tickInterval?: number;
-}) {
-  return (
-    <div style={{ height, marginTop: 10 }}>
-      <ResponsiveContainer>
-        <BarChart data={data}>
-          <CartesianGrid {...gridProps} />
-          <XAxis dataKey="name" {...axisProps} interval={tickInterval} tick={{ fill: axisProps.tick.fill, fontSize: tickFontSize }} />
-          <YAxis {...axisProps} />
-          <Tooltip
-            {...tooltipProps}
-            cursor={barCursor}
-            formatter={(value: any, _name: any, item: any) => {
-              // An empty band still raises a tooltip from the cursor, so say so rather than "RM 0.00".
-              const count = item?.payload?.trades;
-              if (!count) return ["no trades", "P&L"];
-              return [formatMoney(value, currency, true), `${count} trade${count === 1 ? "" : "s"}`];
-            }}
-          />
-          <Bar dataKey="pnl" radius={[6, 6, 0, 0]} maxBarSize={46}>
-            {data.map((d, i) => <Cell key={i} fill={pnlColor(d.pnl)} />)}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
 export default function Analytics() {
   // Shared with the dashboard and the journal: the charts and the table read the same rows.
   const tradesQ = useCachedQuery<Trade[]>(KEYS.trades, loadTrades);
@@ -148,6 +129,7 @@ export default function Analytics() {
   const strategiesQ = useCachedQuery<any[]>(KEYS.strategies, loadStrategies);
   const tagsQ = useCachedQuery<any[]>(KEYS.tags, loadTags);
   const flowsQ = useCachedQuery<any[]>(KEYS.flows, loadFlows);
+  const tradeTagsQ = useTradeTagsMap();
   const all = tradesQ.data ?? [];
   const accounts = accountsQ.data ?? [];
   const strategies = strategiesQ.data ?? [];
@@ -156,9 +138,9 @@ export default function Analytics() {
   const flows = (flowsQ.error ? null : flowsQ.data) as CashFlow[] | null;
   const [filters, setFilters] = useState<Filters>({ ...emptyFilters });
   const loading = tradesQ.loading || accountsQ.loading || flowsQ.loading;
-  const loadError = tradesQ.error ?? accountsQ.error ?? strategiesQ.error ?? tagsQ.error;
+  const loadError = tradesQ.error ?? accountsQ.error ?? strategiesQ.error ?? tagsQ.error ?? tradeTagsQ.error;
 
-  const ts = useMemo(() => applyFilters(all, filters) as Trade[], [all, filters]);
+  const ts = useMemo(() => applyFilters(all, filters, tradeTagsQ.map) as Trade[], [all, filters, tradeTagsQ.map]);
   // Money follows the filtered account's currency, falling back to the journal default (RM).
   const currency = accounts.find(a => a.id === filters.account)?.currency;
   const stats = useMemo(() => calculateStats(ts), [ts]);
@@ -249,39 +231,13 @@ export default function Analytics() {
           <Card>
             <CardContent>
             <b>Equity Curve</b>
-            <div style={{ height: 300, marginTop: 10 }}>
-              <ResponsiveContainer>
-                <AreaChart data={eq}>
-                  <defs>
-                    <linearGradient id="analyticsEquityFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={CHART.accent} stopOpacity={0.38} />
-                      <stop offset="100%" stopColor={CHART.accent} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid {...gridProps} />
-                  <XAxis dataKey="x" {...axisProps} />
-                  <YAxis {...axisProps} />
-                  <Tooltip {...tooltipProps} />
-                  <Area type="monotone" dataKey="pnl" stroke={CHART.accent} strokeWidth={2.5} fill="url(#analyticsEquityFill)" dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+            <AnalyticsEquityCurve data={eq} />
             </CardContent>
           </Card>
           <Card>
             <CardContent>
             <b>R Distribution</b>
-            <div style={{ height: 300, marginTop: 10 }}>
-              <ResponsiveContainer>
-                <BarChart data={rdist}>
-                  <CartesianGrid {...gridProps} />
-                  <XAxis dataKey="range" tick={{ fill: CHART.axis, fontSize: 8.5 }} axisLine={false} tickLine={false} />
-                  <YAxis allowDecimals={false} {...axisProps} />
-                  <Tooltip {...tooltipProps} cursor={barCursor} />
-                  <Bar dataKey="count" fill={CHART.accent} radius={[6, 6, 0, 0]} maxBarSize={46} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            <RDistributionChart data={rdist} />
             </CardContent>
           </Card>
         </div>

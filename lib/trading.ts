@@ -447,6 +447,22 @@ export function dayKey(value: string | Date) {
 }
 
 /**
+ * Whether a trade opened at `value` falls inside a filter's `from`/`to` days.
+ *
+ * Both bounds are Malaysian calendar days, and so is the trade's own day: they are compared as the
+ * "YYYY-MM-DD" keys `dayKey` produces rather than as instants, because an instant compared against a
+ * viewer-local midnight puts a trade near the boundary on the wrong day — the journal is a Bursa
+ * record, so a trade at 01:00 on the 16th is the 16th even when the page is read from London. A blank
+ * bound is open-ended; an unreadable date cannot be inside a range, so it is dropped when one is set.
+ */
+export function inDayRange(value: string | Date | null | undefined, from?: string | null, to?: string | null) {
+  if (!from && !to) return true;
+  const day = value ? dayKey(value) : "";
+  if (!day) return false;
+  return (!from || day >= from) && (!to || day <= to);
+}
+
+/**
  * The Malaysian calendar month of a timestamp as "YYYY-MM" — the key a month's trades share.
  * Malaysia time for the same reason `dayKey` is: a trade opened on the 1st at 09:00 belongs to that
  * month wherever the page is read.

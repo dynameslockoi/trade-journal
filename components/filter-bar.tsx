@@ -2,7 +2,7 @@
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { BURSA_SECTORS, SESSIONS, sessionLabel } from "@/lib/trading";
+import { BURSA_SECTORS, SESSIONS, inDayRange, sessionLabel } from "@/lib/trading";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -157,4 +157,30 @@ export function FilterBar({ filters, setFilters, accounts, strategies, tags }: {
   );
 }
 
-export function applyFilters(ts: any[], f: Filters) { return ts.filter(t => { const pnl = Number(t.net_pnl || 0); if (f.account && t.account_id !== f.account) return false; if (f.strategy && t.strategy_id !== f.strategy) return false; if (f.session && t.session !== f.session) return false; if (f.sector && (t.sector || "") !== f.sector) return false; if (f.result === "win" && pnl <= 0) return false; if (f.result === "loss" && pnl >= 0) return false; if (f.result === "breakeven" && pnl !== 0) return false; if (f.ipo === "ipo" && !t.is_ipo) return false; if (f.ipo === "market" && t.is_ipo) return false; if (f.symbol && !String(t.symbol || "").toLowerCase().includes(f.symbol.trim().toLowerCase())) return false; if (f.from && new Date(t.entry_at) < new Date(`${f.from}T00:00:00`)) return false; if (f.to && new Date(t.entry_at) > new Date(`${f.to}T23:59:59.999`)) return false; if (f.tag && !(t.trade_tags || []).some((x: any) => x.tag_id === f.tag)) return false; return true }) }
+/**
+ * `tagsByTrade` is `useTradeTagsMap()`'s map (see lib/data.ts) — trades from the shared cache
+ * don't carry their own `trade_tags` embed, so the Tag filter has nowhere else to read a trade's
+ * tags from. Omitting it is only safe when nothing has `filters.tag` set, i.e. no caller lets the
+ * Tag field render without also wiring this up.
+ */
+export function applyFilters(ts: any[], f: Filters, tagsByTrade?: Map<string, Set<string>>) {
+  return ts.filter(t => {
+    const pnl = Number(t.net_pnl || 0);
+    if (f.account && t.account_id !== f.account) return false;
+    if (f.strategy && t.strategy_id !== f.strategy) return false;
+    if (f.session && t.session !== f.session) return false;
+    if (f.sector && (t.sector || "") !== f.sector) return false;
+    if (f.result === "win" && pnl <= 0) return false;
+    if (f.result === "loss" && pnl >= 0) return false;
+    if (f.result === "breakeven" && pnl !== 0) return false;
+    if (f.ipo === "ipo" && !t.is_ipo) return false;
+    if (f.ipo === "market" && t.is_ipo) return false;
+    if (f.symbol && !String(t.symbol || "").toLowerCase().includes(f.symbol.trim().toLowerCase())) return false;
+    // Both bounds are Malaysian calendar days, compared against the trade's Malaysian day — see
+    // `inDayRange`. Parsing them into a local-midnight instant would file a 01:00 trade under the
+    // previous day for anyone reading the journal from another timezone.
+    if (!inDayRange(t.entry_at, f.from, f.to)) return false;
+    if (f.tag && !tagsByTrade?.get(t.id)?.has(f.tag)) return false;
+    return true;
+  });
+}
