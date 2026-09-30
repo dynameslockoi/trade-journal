@@ -429,7 +429,7 @@ paints its cards and trades before the few hundred kilobytes of charting code ar
 
 ## Checks
 
-`npm test` runs six check scripts, all of which exist because a plausible wrong number — or a rule that
+`npm test` runs seven check scripts, all of which exist because a plausible wrong number — or a rule that
 quietly stopped applying — is worse than a crash:
 
 - **`scripts/fee-check.mts`** — the published broker schedules (M+ worked examples, Moomoo's platform
@@ -456,6 +456,11 @@ quietly stopped applying — is worse than a crash:
   transient failure retries itself after the back-off with no navigation and no listener, a permanent one
   (a missing function or table) is left alone, and an invalidation or a clear cancels a retry already
   waiting. A cache that stopped retrying would not crash — it would just look like the journal went empty.
+- **`scripts/picker-check.mts`** — the date picker's layout, which no other check can see: a panel
+  that renders perfectly can still refuse every click if the caption is allowed to paint over the nav
+  buttons. It pins the nav into the caption's row rather than an overlay, the month and year dropdowns
+  with the native `<select>` hidden behind the label, the grid opting out of the journal's own `th`/`td`
+  rules, and the circular chosen day.
 - **`scripts/sql-check.mjs`** — runs `schema.sql`, `admin.sql`, `cashflow.sql`, `access.sql` and
   `create-user.sql` against a real Postgres (PGlite, in WASM) inside a fake Supabase environment, then
   tries to break in: sign up with no code, reuse a spent one, promote myself, extend my own access, read
@@ -492,7 +497,7 @@ lib/
   supabase/               browser, server and middleware clients
   utils.ts                cn()
 supabase/                 the SQL files to run, in order
-scripts/                  the check scripts (fees, calculations, access, demo, cache, SQL)
+scripts/                  the check scripts (fees, calculations, access, demo, cache, picker, SQL)
   demo-data.mts           generates the demo journal; `npm run demo:seed` / `demo:clear`
 proxy.ts                  keeps the Supabase session fresh
 next.config.ts            security headers

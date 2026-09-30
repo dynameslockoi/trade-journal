@@ -433,36 +433,69 @@ select.input { cursor: pointer; }
 /* The month grid: react-day-picker renders the markup, the app owns every pixel of it. Its own
    stylesheet is deliberately not loaded — it is unlayered, so it would outrank this file. */
 .app-calendar { font-size: 11.5px; color: var(--text); user-select: none; }
-/* The nav is a child of the months wrapper, so that is what the buttons anchor against. */
+/* One row — ‹ on the left, the month and year dropdowns in the middle, › on the right — with the
+   day grid beneath it spanning all three. Everything is in the flow: an absolutely positioned nav
+   was what the caption painted over, which is why its clicks never landed. */
 .pick-months { position: relative; }
-.pick-month { position: relative; }
-.pick-caption { display: flex; align-items: center; min-height: 30px; padding-right: 62px; }
-.pick-caption-label { font-size: 12.5px; font-weight: 700; letter-spacing: -0.01em; }
-/* The nav sits in the caption's row, its buttons at the far right. */
-.pick-nav { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 4px; }
+.pick-month {
+  display: grid; grid-template-columns: 26px minmax(0, 1fr) 26px;
+  align-items: center; column-gap: 4px; row-gap: 8px;
+}
+.pick-month > .pick-grid { grid-column: 1 / -1; }
+.pick-caption { display: flex; align-items: center; justify-content: center; min-height: 26px; }
+.pick-dropdowns { display: flex; align-items: center; justify-content: center; gap: 2px; }
+/* The caption wears the label; the real control is the native <select>, stretched invisibly across
+   it, so the dropdown keeps native keyboard, touch and screen-reader behaviour while looking like
+   the rest of the app. */
+.pick-dropdown-root { position: relative; display: inline-flex; align-items: center; }
+.pick-dropdown {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+  opacity: 0; cursor: pointer;
+}
+.pick-dropdown-root[data-disabled="true"] .pick-dropdown { cursor: not-allowed; }
+.pick-caption-label {
+  display: inline-flex; align-items: center; gap: 2px; padding: 4px 5px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 700; letter-spacing: -0.01em;
+}
+.pick-dropdown-root:hover .pick-caption-label { background: var(--surface-3); }
+/* The select is invisible, so focus has to be shown on the label instead. */
+.pick-dropdown-root:focus-within .pick-caption-label { background: var(--surface-3); box-shadow: 0 0 0 3px var(--accent-soft); }
+.pick-chevron { flex: none; color: var(--text-faint); }
 .pick-nav-btn {
-  display: grid; place-items: center; width: 27px; height: 27px;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
-  color: var(--text-dim); cursor: pointer;
+  display: grid; place-items: center; width: 26px; height: 26px;
+  border: 0; border-radius: 999px; background: transparent; color: var(--text); cursor: pointer;
 }
-.pick-nav-btn:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
-.pick-nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.pick-grid { border-collapse: collapse; }
+.pick-nav-btn:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--surface-3); }
+/* The `around` layout marks a spent button with `aria-disabled` rather than `disabled`, so the
+   cursor has to follow the attribute, not the pseudo-class. */
+.pick-nav-btn:disabled, .pick-nav-btn[aria-disabled="true"] { opacity: 0.35; cursor: not-allowed; }
+.pick-nav-btn:focus-visible, .pick-day-btn:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+/* A fixed layout lets the seven columns share the panel evenly, the way the days sit in the design. */
+.pick-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+/* This grid is a <table>, so the journal's own table rules have to be switched off inside it: the
+   cell rules, the banded week row on hover, and the uppercase the app gives every other header. */
+.pick-grid th, .pick-grid td { border: 0; background: transparent; text-transform: none; letter-spacing: normal; }
+.pick-grid tbody tr:hover { background: transparent; }
 .pick-weekday {
-  padding: 2px 0 6px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--text-faint);
+  padding: 2px 0 7px; font-size: 10.5px; font-weight: 600; text-align: center;
+  color: var(--text-faint);
 }
-.pick-day { padding: 0; }
+.pick-day { padding: 1px 0; }
 .pick-day-btn {
-  width: 33px; height: 31px; display: grid; place-items: center;
-  border: 1px solid transparent; border-radius: 9px; background: transparent;
+  width: 31px; height: 31px; margin: 0 auto; display: grid; place-items: center;
+  border: 0; border-radius: 999px; background: transparent;
   color: var(--text-dim); font: inherit; font-size: 11.5px; font-variant-numeric: tabular-nums;
-  cursor: pointer; transition: background 0.14s ease, color 0.14s ease;
+  cursor: pointer; transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
 }
 .pick-day-btn:hover { background: var(--surface-3); color: var(--text); }
 .pick-day-outside .pick-day-btn { opacity: 0.38; }
 .pick-day-today:not(.pick-day-selected) .pick-day-btn { color: var(--accent); font-weight: 800; }
-.pick-day-selected .pick-day-btn { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+/* The halo is the selection's own glow, so a chosen day reads at a glance without a second colour. */
+.pick-day-selected .pick-day-btn {
+  background: var(--accent); color: #fff; font-weight: 700; box-shadow: 0 0 0 3px var(--accent-soft);
+}
 .pick-day-disabled .pick-day-btn { opacity: 0.4; cursor: not-allowed; }
 .pick-hidden { visibility: hidden; }
 .select-viewport { padding: 0 5px; max-height: 272px; overflow-y: auto; }
