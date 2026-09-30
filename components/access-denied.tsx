@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { LogOut } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { browserClient } from "@/lib/supabase/browser";
 import { clear } from "@/lib/query-cache";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,7 +29,7 @@ export function AccessDenied({ state, notice, email }: { state: AccessState; not
   async function signout() {
     setBusy(true);
     setError("");
-    const { error: signOutError } = await createClient().auth.signOut();
+    const { error: signOutError } = await (await browserClient()).auth.signOut();
     if (signOutError) {
       // Signing out failed, so the session is still live: say so rather than appearing to do nothing.
       setError(signOutError.message);

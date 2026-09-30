@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { LogOut, UserRound } from "lucide-react";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
+import { browserClient } from "@/lib/supabase/browser";
 import { clear } from "@/lib/query-cache";
 import { Button } from "@/components/ui/button";
 
@@ -15,7 +15,7 @@ export function UserMenu({ email, name }: { email: string; name?: string }) {
   async function signout() {
     // A sign-out that failed leaves the session live: sending the browser to the login page anyway
     // would look like it worked while the next request walked straight back in.
-    const { error } = await createClient().auth.signOut();
+    const { error } = await (await browserClient()).auth.signOut();
     if (error) {
       toast.error(error.message);
       return;

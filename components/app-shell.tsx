@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { KEYS, warmData } from "@/lib/data";
+import { KEYS } from "@/lib/data";
 import { loadMe, type Me } from "@/lib/admin";
 import { accessState, expiryNotice } from "@/lib/access";
 import { useCachedQuery } from "@/lib/query-cache";
@@ -43,27 +42,10 @@ export function AppShell({ email, name, children }: { email: string; name?: stri
   const notice = expiryNotice(me.data, today, { formatDate: dateLabel });
   const isAdmin = Boolean(me.data?.is_admin);
 
-  /**
-   * Read the pages behind the links before they are clicked.
-   *
-   * A cached page opens instantly, but the first walk through the app is still a series of cold
-   * queries. Fetching the shared datasets once, while the browser is idle and after the page on
-   * screen has settled, means the click that follows has nothing left to wait for. The hook order
-   * matters: this sits above the standalone-route return so login pages skip it, mounted as a
-   * sibling so it never renders anything.
-   */
-  useEffect(() => {
-    if (standalone) return;
-    // `requestIdleCallback` keeps the warm-up behind whatever the user is actually reading; the
-    // timeout is the ceiling for a busy page, and a browser without it falls back to a short delay.
-    const idle = (window as typeof window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
-    if (idle) {
-      const id = idle(() => warmData(), { timeout: 2500 });
-      return () => (window as any).cancelIdleCallback?.(id);
-    }
-    const timer = setTimeout(warmData, 600);
-    return () => clearTimeout(timer);
-  }, [standalone]);
+  // The pages behind the links used to be fetched in the background from here, on an idle callback.
+  // Nothing needs warming now: the server reads every shared row set before it sends the page and
+  // hands them down through `CacheSeed` (see lib/seed.ts), so the cache is already full before the
+  // first link is clicked — and the browser never has to ask for those rows at all.
 
   if (standalone) return <>{children}</>;
   if (!access.ok) return <AccessDenied state={access} notice={notice} email={email} />;

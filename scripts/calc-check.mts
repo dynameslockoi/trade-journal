@@ -171,14 +171,14 @@ check("a day's gross is net plus charges", days[0].gross, 110);
 
 /* -------------------------------------- the cached projection behind the calculators */
 // `dailySummaries` and the stats read fields off the trades the shared cache hands them, and that
-// projection is a hand-kept list (`TRADE_LIST_COLUMNS` in lib/data.ts). A trim can drop a field the
+// projection is a hand-kept list (`TRADE_LIST_COLUMNS` in lib/queries.ts). A trim can drop a field the
 // calculators still read without failing anything that runs here — the calendar then reports every
 // day as free rather than erroring — so the list is read out of the source and checked against the
 // fields those functions actually need.
-const dataSource = readFileSync(new URL("../lib/data.ts", import.meta.url), "utf8");
-const columnsStart = dataSource.indexOf("const TRADE_LIST_COLUMNS = [");
+const dataSource = readFileSync(new URL("../lib/queries.ts", import.meta.url), "utf8");
+const columnsStart = dataSource.indexOf("export const TRADE_LIST_COLUMNS = [");
 const columnsEnd = dataSource.indexOf('].join(",")', columnsStart);
-check("the projection list was found in lib/data.ts", columnsStart >= 0 && columnsEnd > columnsStart, "true");
+check("the projection list was found in lib/queries.ts", columnsStart >= 0 && columnsEnd > columnsStart, "true");
 const projected = new Set(
   [...dataSource.slice(columnsStart, columnsEnd).matchAll(/"([a-z_]+)"/g)].map(m => m[1]),
 );

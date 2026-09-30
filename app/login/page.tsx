@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { browserClient } from "@/lib/supabase/browser";
 import { loadMe } from "@/lib/admin";
 import { accessState } from "@/lib/access";
 import { toISODate, today } from "@/lib/dates";
@@ -30,7 +30,7 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     setError("");
-    const supabase = createClient();
+    const supabase = await browserClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       setError(error.message);

@@ -403,10 +403,12 @@ permissions policy, HSTS) are applied by Next itself.
 ## Why the pages change instantly
 
 Every page reads the same handful of row sets — trades, accounts, strategies, tags, cash flows, zakat —
-so the app fetches each one **once** and keeps it, rather than re-querying on every page you open. Three
+so the app fetches each one **once** and keeps it, rather than re-querying on every page you open. Four
 parts make that work, and they are worth knowing about before touching a page's data loading:
 
-- **`lib/data.ts`** holds one loader per row set and the cache keys for them. Pages call
+- **`lib/queries.ts`** holds one query per row set — the column list, the embeds and the order, as a
+  function that takes a Supabase client — so the server and the browser ask for exactly the same rows.
+  `lib/data.ts` wraps each of them in the cache, one loader per row set. Pages call
   `useCachedQuery(KEYS.trades, loadTrades)` and get `{ data, error, loading }`; they do not build their own
   queries. This is also what lets the journal, the dashboard and the analytics share one copy of the same
   trades — and why a loader that throws is better than one that returns `[]`: a failed read has to look
@@ -416,28 +418,36 @@ parts make that work, and they are worth knowing about before touching a page's 
   it changed — that is the whole invalidation story, and it is why a saved trade appears in the journal
   without a reload. It marks the rows stale instead of dropping them, so the journal does not lose your
   column choices and search while the fresh rows travel.
-- **The shell warms the rest.** After the page on screen has settled, `warmData()` fetches the shared row
-  sets on an idle callback, so the first click on a page you have not opened yet costs nothing either.
+- **The server reads them first.** `lib/seed.ts` runs those queries while it renders the page you asked
+  for — it is talking to the same database anyway, for the session — and hands the rows down as a context
+  value, so the first HTML already carries your numbers instead of a skeleton. On a production build that
+  moved the figures from ~640 ms (the browser hydrated, then asked for nine separate row sets) to the
+  first paint, and the browser now makes **no** Supabase request to show them. The seed is a head start,
+  never a different answer: a key it could not read is simply left out and fetched by the page the way it
+  always was, and the cache outranks it whenever it holds anything.
 
 Two server-side details matter for the same reason: the middleware and the root layout check the session
 with `getClaims()` (the session's JWT is verified against the project's cached signing keys) instead of
 `getUser()` (a request to the auth server), and the layout reads your display name from the token rather
 than querying `profiles` on every navigation. The chart library is a dynamic import, so the dashboard
-paints its cards and trades before the few hundred kilobytes of charting code arrive.
+paints its cards and trades before the few hundred kilobytes of charting code arrive — and the Supabase
+browser client is imported **on demand** (`@/lib/supabase/browser`) rather than at the top of every
+module, because after a seed a page that is already holding its rows never needs it. That took the
+library, a quarter of the shell's JavaScript, out of the first load altogether.
 
 ---
 
 ## Checks
 
-`npm test` runs seven check scripts, all of which exist because a plausible wrong number — or a rule that
-quietly stopped applying — is worse than a crash:
+`npm test` runs eight check scripts, all of which exist because a plausible wrong number — or a rule
+that quietly stopped applying — is worse than a crash:
 
 - **`scripts/fee-check.mts`** — the published broker schedules (M+ worked examples, Moomoo's platform
   fee, the tariff boundaries and stamp-duty caps), the tiered/intraday rates, the IPO subscription maths
   for every channel including the financing formula and the cash-only case, and the split between the
   broker's charges and the market's.
 - **`scripts/calc-check.mts`** — gross P&L, risk, R formatting, percentages, holding-time buckets, and the
-  Malaysian-time day/month boundaries including leap Februaries. It also reads `lib/data.ts` and asserts
+  Malaysian-time day/month boundaries including leap Februaries. It also reads `lib/queries.ts` and asserts
   the projection every page shares still carries each field the calculators read, so trimming that list
   cannot silently turn a day's charges into zero; and it covers the date-range filter's Malaysian day
   boundary.
@@ -456,11 +466,21 @@ quietly stopped applying — is worse than a crash:
   transient failure retries itself after the back-off with no navigation and no listener, a permanent one
   (a missing function or table) is left alone, and an invalidation or a clear cancels a retry already
   waiting. A cache that stopped retrying would not crash — it would just look like the journal went empty.
+  It also pins what the server's seed may do: fill a gap, never override an answer the store already
+  holds (a write's invalidation included), never hide a failure, and never be adopted while the server
+  renders — that store is a module-level singleton there, and a write during one request's render would
+  hand that trader's rows to the next request.
 - **`scripts/picker-check.mts`** — the date picker's layout, which no other check can see: a panel
   that renders perfectly can still refuse every click if the caption is allowed to paint over the nav
   buttons. It pins the nav into the caption's row rather than an overlay, the month and year dropdowns
   with the native `<select>` hidden behind the label, the grid opting out of the journal's own `th`/`td`
   rules, and the circular chosen day.
+- **`scripts/perf-check.mts`** — the two decisions that keep the first load small, neither of which is
+  visible in any behaviour: the layout reads the shared rows on the server before it sends the page, and
+  the Supabase browser client is reached through the on-demand accessor instead of imported outright. It
+  reads the sources and fails if the layout stops seeding, if a module on the shell's own path starts
+  importing `@/lib/supabase/client` directly, if the shell goes back to fetching rows in the background,
+  or if the dashboard's chart stops being a dynamic import.
 - **`scripts/sql-check.mjs`** — runs `schema.sql`, `admin.sql`, `cashflow.sql`, `access.sql` and
   `create-user.sql` against a real Postgres (PGlite, in WASM) inside a fake Supabase environment, then
   tries to break in: sign up with no code, reuse a spent one, promote myself, extend my own access, read
@@ -487,17 +507,19 @@ components/               shared UI: shell, sidebar, filter bar, stat cards, spa
                           access-denied, access-expiry (the countdown band)
 components/ui/            shadcn/ui primitives on Radix + Tailwind
 lib/
+  queries.ts              the shared reads, run against whichever Supabase client is passed in
   data.ts                 one cached loader per row set, plus the cache keys
-  query-cache.ts          the client cache: TTL, de-duped requests, invalidation
+  seed.ts                 those same reads on the server, for the page's first HTML
+  query-cache.ts          the client cache: TTL, de-duped requests, invalidation, the server's seed
   admin.ts                the admin RPCs: me(), the overview, access and invitation writes
   access.ts               who may sign in, and which invitation codes still work
   fees.ts                 the Bursa cost model and the IPO subscription model
   trading.ts              trade types, filters, stats, grouping, dates, zakat
   dates.ts                Malaysian-time helpers
-  supabase/               browser, server and middleware clients
+  supabase/               browser (imported on demand), server and middleware clients
   utils.ts                cn()
 supabase/                 the SQL files to run, in order
-scripts/                  the check scripts (fees, calculations, access, demo, cache, picker, SQL)
+scripts/                  the check scripts (fees, calculations, access, demo, cache, picker, performance, SQL)
   demo-data.mts           generates the demo journal; `npm run demo:seed` / `demo:clear`
 proxy.ts                  keeps the Supabase session fresh
 next.config.ts            security headers

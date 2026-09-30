@@ -1,6 +1,7 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
+import { browserClient } from "@/lib/supabase/browser";
+import { fetchMe, type Me } from "@/lib/queries";
 import { PermanentError } from "@/lib/query-cache";
 
 /**
@@ -17,13 +18,8 @@ import { PermanentError } from "@/lib/query-cache";
  * answer and the page turns it into what to run instead of a raw parse error.
  */
 
-export type Me = {
-  email: string | null;
-  display_name: string | null;
-  is_admin: boolean;
-  status: string;
-  access_until: string | null;
-};
+/** The account's own access state — the shape `public.me()` answers with. */
+export type { Me };
 
 export type AdminStats = {
   users: number;
@@ -97,16 +93,23 @@ function failed(message: string): Error {
   return isMissingSchema(message) ? new PermanentError(message) : new Error(message);
 }
 
-/** The signed-in account: admin or not, allowed in or not. Null when there is no profile row. */
+/**
+ * The signed-in account: admin or not, allowed in or not. Null when there is no profile row.
+ *
+ * The read itself is `fetchMe` (lib/queries.ts), the same one the server runs to put it in the first
+ * HTML; what belongs here is the judgement about the failure — see `failed` above.
+ */
 export async function loadMe(): Promise<Me | null> {
-  const { data, error } = await createClient().rpc("me");
-  if (error) throw failed(error.message);
-  return (data as Me | null) ?? null;
+  try {
+    return await fetchMe(await browserClient());
+  } catch (error) {
+    throw failed(error instanceof Error ? error.message : String(error));
+  }
 }
 
 /** One read for the whole admin page: counts, every account, every invitation code. */
 export async function loadAdminOverview(): Promise<AdminOverview> {
-  const { data, error } = await createClient().rpc("admin_overview");
+  const { data, error } = await (await browserClient()).rpc("admin_overview");
   if (error) throw failed(error.message);
   const overview = data as AdminOverview | null;
   if (!overview) throw new Error("The admin overview returned nothing.");
@@ -115,7 +118,7 @@ export async function loadAdminOverview(): Promise<AdminOverview> {
 
 /** Usable? — asked before an account exists, which is why it needs no session. */
 export async function checkInviteCode(code: string): Promise<AdminResult> {
-  const { data, error } = await createClient().rpc("check_invite", { code });
+  const { data, error } = await (await browserClient()).rpc("check_invite", { code });
   // Not marked permanent: this runs once, from a form, on a screen with no cache behind it.
   if (error) throw new Error(error.message);
   return (data as AdminResult) ?? { ok: false, reason: "That invitation code could not be checked." };
@@ -132,7 +135,7 @@ export async function adminSetUser(input: {
   accessUntil: string | null;
   note: string | null;
 }): Promise<void> {
-  const { error } = await createClient().rpc("admin_set_user", {
+  const { error } = await (await browserClient()).rpc("admin_set_user", {
     target: input.id,
     new_status: input.status,
     new_access_until: input.accessUntil,
@@ -147,7 +150,7 @@ export async function adminCreateInvite(input: {
   maxUses: number;
   expiresAt: string | null;
 }): Promise<AdminResult> {
-  const { data, error } = await createClient().rpc("admin_create_invite", {
+  const { data, error } = await (await browserClient()).rpc("admin_create_invite", {
     new_code: input.code || null,
     new_note: input.note || null,
     new_max_uses: input.maxUses,
@@ -172,7 +175,7 @@ export async function adminCreateUser(input: {
   accessUntil: string | null;
   note: string | null;
 }): Promise<CreatedUser> {
-  const { data, error } = await createClient().rpc("admin_create_user", {
+  const { data, error } = await (await browserClient()).rpc("admin_create_user", {
     new_email: input.email.trim(),
     new_password: input.password,
     new_name: input.name.trim() || null,
@@ -195,7 +198,7 @@ export async function adminSetInvite(input: {
   clearExpiry?: boolean;
   note?: string;
 }): Promise<void> {
-  const { error } = await createClient().rpc("admin_set_invite", {
+  const { error } = await (await browserClient()).rpc("admin_set_invite", {
     target_code: input.code,
     new_disabled: input.disabled ?? null,
     new_expires_at: input.expiresAt ?? null,

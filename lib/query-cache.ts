@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 /**
  * A tiny cache for the data every page asks for.
@@ -22,6 +22,10 @@ import { useEffect, useRef, useState } from "react";
  *     again instead of rendering "no trades" over a dropped connection.
  *   * **A write outranks a request already in flight.** Each fetch carries a token; when a newer one
  *     starts, the older answer is discarded rather than written over it.
+ *   * **The server's head start is a starting point, not a source of truth.** `lib/seed.ts` reads the
+ *     same rows on the server and hands them down as a context value, so the first HTML already
+ *     carries them and the browser has nothing to fetch; `initialSnapshot` below decides between the
+ *     seed and the store, and the store wins whenever it holds anything at all.
  *
  * The store lives in the module, so it survives the unmount a route change causes — and `clear()` wipes
  * it on sign-out, because everything in it belongs to one trader.
@@ -40,6 +44,17 @@ const DEFAULT_TTL = 60_000;
  * enough that a dropped connection recovers on its own and long enough that it is not a loop.
  */
 const DEFAULT_RETRY_AFTER = 5_000;
+
+/**
+ * The rows the server already read for this page load, handed down as a context value.
+ *
+ * `lib/seed.ts` on the server fetches the shared datasets and passes them to the shell; this is how
+ * a page reaches them. It is a context rather than a write into the store below because the store is
+ * a module-level singleton: writing to it *while the server renders* would leave one trader's rows
+ * sitting there for the next request to read. A context value belongs to the render that made it, so
+ * the server can hand rows to the page it is rendering and to nobody else.
+ */
+export const SeedContext = createContext<Record<string, unknown> | null>(null);
 
 /**
  * The live back-off, so a check can exercise the retry without waiting five seconds. Production
@@ -130,6 +145,61 @@ function snapshot<T>(key: string, ttl = DEFAULT_TTL): { data: T | null; error: s
     // Only a page with nothing to show is "loading" — a background refresh keeps the page it has.
     loading: data === null && !entry?.error,
   };
+}
+
+/**
+ * What a page renders with: what the cache holds, or — when it holds nothing — the rows the server
+ * read for this page load.
+ *
+ * The order is the whole point, and it is the same order on the server, on the first client render
+ * and on every render after it, which is what keeps hydration honest: the server has a seed and an
+ * empty store, so it renders the seeded rows into the HTML, and the browser's first render — the one
+ * React compares that HTML against — reaches the same answer, because the seed travels in the same
+ * payload the HTML was made from.
+ *
+ * The cache and an error both outrank the seed. A cache entry that exists is either fresh (the seed
+ * is a duplicate of it) or a write has just invalidated it (at `at: 0`, and the page must keep
+ * showing the rows it has while the fresh ones travel, rather than snapping back to whatever the
+ * page was loaded with). An error is reported as an error: falling back to the seed would hide a
+ * read that is failing behind a set of rows that were true at page load.
+ */
+export function initialSnapshot<T>(
+  key: string,
+  ttl = DEFAULT_TTL,
+  seed: Record<string, unknown> | null = null
+): { data: T | null; error: string | null; loading: boolean } {
+  const held = snapshot<T>(key, ttl);
+  if (held.data !== null || held.error) return held;
+  if (seed !== null && Object.prototype.hasOwnProperty.call(seed, key)) {
+    return { data: seed[key] as T, error: null, loading: false };
+  }
+  return held;
+}
+
+/**
+ * Put the server's rows into the store, so this page load is the only one that pays for them.
+ *
+ * The seed arrives with the HTML, so the page it belongs to already has its data; this is about
+ * every page *after* it. Writing the rows here — once, on the client, under the key the loaders use
+ * — means the next navigation finds them held and skips its query, exactly as if a previous page had
+ * fetched them. Two guards:
+ *
+ *   * **Never while the server renders.** The store is a module-level singleton on the server too,
+ *     and a write there would leak these rows into another request's render. A seed is only adopted
+ *     in the browser.
+ *   * **Never over something better.** A read already in flight, or a fresh answer, is the same rows
+ *     or newer ones; the seed only fills a gap.
+ */
+export function seed(entries: Record<string, unknown>) {
+  if (typeof window === "undefined") return;
+  const now = Date.now();
+  for (const [key, data] of Object.entries(entries)) {
+    const held = store.get(key);
+    if (held?.promise) continue;
+    if (held && held.at > 0 && now - held.at < (held.ttl ?? DEFAULT_TTL)) continue;
+    store.set(key, { data, at: now });
+    notify(key);
+  }
 }
 
 /** What is held for a key, and whether it is still fresh enough to skip the query. */
@@ -258,15 +328,28 @@ export function useCachedQuery<T>(
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
-  // Read synchronously on the first render, so a cached page paints with its data already present
-  // rather than flashing a spinner for a frame.
-  const [state, setState] = useState(() => (enabled ? snapshot<T>(key, ttl) : { data: null, error: null, loading: false }));
+  // The rows the server read for this page load, if any. `null` outside the shell's provider — a
+  // login page, or a check script.
+  const seededMap = useContext(SeedContext);
+  const seeded = seededMap !== null && Object.prototype.hasOwnProperty.call(seededMap, key) ? (seededMap[key] as T) : undefined;
+
+  // Read synchronously on the first render — cache first, then the seed — so a cached page paints
+  // with its data already present rather than flashing a spinner for a frame.
+  const [state, setState] = useState(() =>
+    enabled ? initialSnapshot<T>(key, ttl, seededMap) : { data: null, error: null, loading: false }
+  );
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
-    const publish = () => { if (alive) setState(snapshot<T>(key, ttl)); };
+    // The same rule as the first render, so a notification never drops back to a spinner the page
+    // was not showing — see `initialSnapshot`.
+    const publish = () => { if (alive) setState(initialSnapshot<T>(key, ttl, seededMap)); };
+
+    // Adopt the server's rows once. The page on screen already has them; this leaves them held for
+    // the pages after it.
+    if (seeded !== undefined && !store.has(key)) seed({ [key]: seeded });
 
     const set = listeners.get(key) ?? new Set<() => void>();
     listeners.set(key, set);
@@ -282,7 +365,7 @@ export function useCachedQuery<T>(
       set.delete(kick);
       if (!set.size) listeners.delete(key);
     };
-  }, [key, ttl, enabled, tick]);
+  }, [key, ttl, enabled, tick, seeded, seededMap]);
 
   return state;
 }

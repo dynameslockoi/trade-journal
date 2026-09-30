@@ -1,8 +1,10 @@
 import "./globals.css";
 import { Inter } from "next/font/google";
 import { AppShell } from "@/components/app-shell";
+import { CacheSeed } from "@/components/cache-seed";
 import { ThemeProvider } from "@/components/theme-provider";
 import { createClient } from "@/lib/supabase/server";
+import { loadSeed } from "@/lib/seed";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 /** Self-hosted by next/font, so there is no render-blocking font request. globals.css keeps a
@@ -43,11 +45,18 @@ export default async function RootLayout({children}:{children:React.ReactNode}) 
     const {data:profile}=await supabase.from("profiles").select("display_name").eq("id",claims.sub).maybeSingle();
     name=profile?.display_name??undefined;
   }
+  // The rows every page reads, read here so they travel with the HTML instead of being fetched by
+  // the browser after hydration — which is what made a cold page show its numbers last. Only for a
+  // signed-in render: the rows are behind RLS, and an anonymous visitor is on the way to /login, so
+  // asking for them there would be eight refused queries for a page that shows none of them.
+  const seed=claims?.sub?await loadSeed():{};
   return (
     <html lang="en" className={inter.variable} suppressHydrationWarning>
       <body>
         <ThemeProvider>
-          <AppShell email={claims?.email??""} name={name}>{children}</AppShell>
+          <CacheSeed seed={seed}>
+            <AppShell email={claims?.email??""} name={name}>{children}</AppShell>
+          </CacheSeed>
         </ThemeProvider>
       </body>
     </html>

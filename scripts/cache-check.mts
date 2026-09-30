@@ -16,7 +16,7 @@
  *
  *   npm run test:cache
  */
-import { PermanentError, clear, invalidate, peek, readCached, setRetryAfterMs } from "../lib/query-cache.ts";
+import { PermanentError, clear, initialSnapshot, invalidate, peek, readCached, seed, setRetryAfterMs } from "../lib/query-cache.ts";
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -94,6 +94,42 @@ await readCached("cleared", async () => { cleared++; throw new Error("down") });
 clear();
 await sleep(WAIT);
 check("a cleared key's timer is dropped", cleared, 1);
+
+/* ------------------------------------------------------------- the server's head start */
+// `lib/seed.ts` reads the shared rows on the server and hands them down with the page, so the first
+// HTML already carries them. It is a head start and nothing more, and the rules below are what keep
+// it from turning into a wrong answer: it fills a gap, it never overrides something better, and it is
+// never adopted by a server render — the store is a module-level singleton there, and a write during
+// one request's render would hand that trader's rows to the next request.
+const seeded = { trades: [{ id: "from-the-seed" }] };
+check("an empty store renders the seed", (initialSnapshot<{ id: string }[]>("trades", 60_000, seeded).data as { id: string }[] | null)?.[0]?.id, "from-the-seed");
+check("a seeded key is not left loading", initialSnapshot("trades", 60_000, seeded).loading, false);
+check("a key the seed does not hold is still loading", initialSnapshot("accounts", 60_000, seeded).loading, true);
+
+let fetched = 0;
+await readCached("trades", async () => { fetched++; return [{ id: "from-the-database" }]; });
+check("a stored answer outranks the seed", (initialSnapshot<{ id: string }[]>("trades", 60_000, seeded).data as { id: string }[] | null)?.[0]?.id, "from-the-database");
+// A write invalidates its keys and the page keeps rendering the rows it has while the fresh ones
+// travel. If the seed outranked that, the row the trader just edited would snap back to its
+// page-load value under their hands.
+invalidate("trades");
+check("a stale-but-held answer still outranks the seed", (initialSnapshot<{ id: string }[]>("trades", 60_000, seeded).data as { id: string }[] | null)?.[0]?.id, "from-the-database");
+check("and no query was re-run by asking", fetched, 1);
+
+await readCached("broken", async () => { throw new Error("read failed"); });
+check("a failure is reported rather than papered over by the seed", initialSnapshot("broken", 60_000, { broken: [{ id: "x" }] }).error, "read failed");
+
+// Adoption only happens in a browser. Before this stands a `window`, so the same call the hook makes
+// after hydration must do nothing at all.
+seed({ never: { id: "leak" } });
+check("a server render adopts nothing", peek("never").data, "null");
+(globalThis as { window?: unknown }).window = {};
+seed({ adopted: { id: "kept" } });
+check("the browser adopts the seed into the store", (peek("adopted").data as { id: string } | null)?.id, "kept");
+await readCached("fresh", async () => ({ id: "newer" }));
+seed({ fresh: { id: "seed" } });
+check("the seed never writes over a fresh answer", (peek("fresh").data as { id: string } | null)?.id, "newer");
+delete (globalThis as { window?: unknown }).window;
 
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nAll cache checks passed");
 process.exit(failures ? 1 : 0);

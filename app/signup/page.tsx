@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { browserClient } from "@/lib/supabase/browser";
 import { checkInviteCode, isMissingSchema } from "@/lib/admin";
 import { normalizeInviteCode } from "@/lib/access";
 import Link from "next/link";
@@ -38,7 +38,7 @@ export default function Signup() {
     if (password.length < 8) { setError("Password must be at least 8 characters."); setLoading(false); return; }
     const code = normalizeInviteCode(invite);
     if (!code) { setError("Enter the invitation code you were given."); setLoading(false); return; }
-    const supabase = createClient();
+    const supabase = await browserClient();
     try {
       const check = await checkInviteCode(code);
       if (!check.ok) {
