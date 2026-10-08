@@ -31,6 +31,33 @@ const nextConfig: NextConfig = {
    * through the `next` CLI.
    */
   output: "standalone",
+  /**
+   * Two settings about the same thing: a page change in this app should never wait on the server.
+   *
+   * Every page here is a client component holding its rows in a browser cache (`lib/query-cache.ts`)
+   * and every route is dynamic — `ƒ` in the build output, because the layout reads the session — so
+   * Next's defaults make navigation slower than the architecture deserves:
+   *
+   *   * **`staleTimes.dynamic` is 0 by default**, which means a dynamic segment is never reusable.
+   *     Going back to a page you were just on therefore asks the server for it again, and because
+   *     every route in the shell has its own `loading.tsx` you also get a skeleton flashed over rows
+   *     the browser is already holding. Thirty seconds of reuse covers a walk around the app; the figures
+   *     still come from the client cache with its own TTL and its `invalidate()` on every write, so
+   *     a reused page cannot show a number the database no longer has. `static` is only consulted
+   *     for a link that asks for a full prefetch, and the schema requires it to be at least 30.
+   *   * **A hovered link only prefetches as far as the nearest `loading.tsx`.** For a dynamic route
+   *     that is the skeleton and nothing else, so the 70–95 KB of route JavaScript measured per page
+   *     (`.next/diagnostics/route-bundle-stats.json`) only begins downloading after the click.
+   *     `dynamicOnHover` enables the `unstable_dynamicOnHover` prop the nav links carry, which upgrades
+   *     a hovered link to a full prefetch — the pointer resting on a section for a moment is enough.
+   *
+   * Both are navigation-only: neither changes what a page reads, and a hard load still renders the
+   * whole thing on the server with its rows in the first HTML (see `lib/seed.ts`).
+   */
+  experimental: {
+    staleTimes: { dynamic: 30, static: 180 },
+    dynamicOnHover: true,
+  },
   async headers() {
     return [
       {

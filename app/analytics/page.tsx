@@ -12,11 +12,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SectorSentiment } from "@/components/sector-sentiment";
+import { OnScreen } from "@/components/on-screen";
 import { toast } from "sonner";
 
 /**
  * Ten charts, one library, loaded once — as its own chunk. See the doc comment in
  * `components/analytics-charts.tsx` for why this page in particular needs the split.
+ *
+ * The split keeps recharts off the page's own bundle, but it is not enough on its own: fetched and
+ * rendered together, the ten of them blocked the main thread for 200–700 ms (long tasks of 325 ms and
+ * 313 ms, measured on a production build) after a page that paints in 31 ms. So each chart is also
+ * wrapped in `OnScreen` below, which mounts it as it comes near the viewport instead.
  */
 const PnlBars = dynamic(() => import("@/components/analytics-charts").then(m => m.PnlBars), {
   ssr: false,
@@ -122,6 +128,17 @@ function grouped(ts: Trade[], key: GroupKey): GroupRow[] {
       : a.order - b.order);
 }
 
+/**
+ * What a breakdown card reserves before it is built: a measured 35 px per row, plus its header and
+ * padding. It is an estimate — the hourly card draws section bands on top of its rows and so reads a
+ * couple of rows short, and every card changes height with the data — which is acceptable here for
+ * the same reason the charts' figures are exact: the correction lands while the card is still off
+ * screen, and the row below it is the only thing that moves.
+ */
+function tableHeight(rows: GroupRow[]) {
+  return rows.length * 35 + 60;
+}
+
 export default function Analytics() {
   // Shared with the dashboard and the journal: the charts and the table read the same rows.
   const tradesQ = useCachedQuery<Trade[]>(KEYS.trades, loadTrades);
@@ -221,7 +238,12 @@ export default function Analytics() {
               <CardContent>
                 <b>{title}</b>
                 <div className="muted text-[11px] mt-0.5">{hint}</div>
-                <PnlBars data={data} currency={currency} tickFontSize={tickFontSize} tickInterval={tickInterval} />
+                {/* The title and the hint stay, so the page still reads as a page; the chart is the
+                    expensive part and most of these cards start below the fold. 290 = the chart's
+                    280 plus the 10 px margin above it, so nothing moves when it arrives. */}
+                <OnScreen height={290}>
+                  <PnlBars data={data} currency={currency} tickFontSize={tickFontSize} tickInterval={tickInterval} />
+                </OnScreen>
               </CardContent>
             </Card>
           ))}
@@ -231,38 +253,50 @@ export default function Analytics() {
           <Card>
             <CardContent>
             <b>Equity Curve</b>
-            <AnalyticsEquityCurve data={eq} />
+            <OnScreen height={310}><AnalyticsEquityCurve data={eq} /></OnScreen>
             </CardContent>
           </Card>
           <Card>
             <CardContent>
             <b>R Distribution</b>
-            <RDistributionChart data={rdist} />
+            <OnScreen height={310}><RDistributionChart data={rdist} /></OnScreen>
             </CardContent>
           </Card>
         </div>
 
         {/* Full width, because a month per column needs the room the two-up grid cannot give it. */}
-        <SectorSentiment
-          trades={ts}
-          currency={currency}
-          onPickMonth={({ from, to, label, sector }) => {
-            setFilters(f => ({ ...f, from, to, sector }));
-            toast.info(`Filtered to ${sector ? `${sector} · ` : ""}${label.split(" · ").pop()}`);
-          }}
-        />
+        {/* 320 px is the strip's height as measured in the browser at the default 24-month window
+            (317 px, four sectors). It is an estimate because the rows are the sectors you have, so a
+            heavier journal reserves a little less than it needs — and the correction happens while
+            the strip is still at least 400 px below the fold, where nobody sees it move. */}
+        <OnScreen height={320}>
+          <SectorSentiment
+            trades={ts}
+            currency={currency}
+            onPickMonth={({ from, to, label, sector }) => {
+              setFilters(f => ({ ...f, from, to, sector }));
+              toast.info(`Filtered to ${sector ? `${sector} · ` : ""}${label.split(" · ").pop()}`);
+            }}
+          />
+        </OnScreen>
 
         {/* The same pairing and the same order as the charts above, so a card and its table are
             found in the same place on the page. */}
         <div className="grid two breakdown-grid">
-          <Breakdown title="Strategy Breakdown" rows={strategy} currency={currency} />
-          <Breakdown title="Sector Breakdown" rows={sector} currency={currency} />
-          <Breakdown title="Hourly Breakdown" rows={hour} currency={currency} sectionOf={hourSessionLabel} />
-          <Breakdown title="Weekday Breakdown" rows={weekday} currency={currency} />
-          <Breakdown title="Holding Period Breakdown" rows={holding} currency={currency} />
-          <Breakdown title="Position Lot Breakdown" rows={lots} currency={currency} />
-          <Breakdown title="IPO Breakdown" rows={ipo} currency={currency} />
-          <Breakdown title="Setup Quality Breakdown" rows={quality} currency={currency} />
+          {([
+            ["Strategy Breakdown", strategy, undefined],
+            ["Sector Breakdown", sector, undefined],
+            ["Hourly Breakdown", hour, hourSessionLabel],
+            ["Weekday Breakdown", weekday, undefined],
+            ["Holding Period Breakdown", holding, undefined],
+            ["Position Lot Breakdown", lots, undefined],
+            ["IPO Breakdown", ipo, undefined],
+            ["Setup Quality Breakdown", quality, undefined],
+          ] as const).map(([title, rows, sectionOf]) => (
+            <OnScreen key={title} height={tableHeight(rows)}>
+              <Breakdown title={title} rows={rows} currency={currency} sectionOf={sectionOf} />
+            </OnScreen>
+          ))}
         </div>
       </>}
     </div>

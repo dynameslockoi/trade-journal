@@ -45,7 +45,10 @@ export function QuickAdd() {
 
   return (
     <Button asChild className="fab">
-      <Link href="/journal/new" aria-keyshortcuts="n" title="Log a trade — press N">
+      {/* The form is the destination this app reaches most often, so the pointer reaching the button
+          starts fetching it (`unstable_dynamicOnHover` + `experimental.dynamicOnHover`); pressing N
+          still navigates straight away, with whatever the prefetch has managed by then. */}
+      <Link href="/journal/new" unstable_dynamicOnHover aria-keyshortcuts="n" title="Log a trade — press N">
         <Plus size={18} />
         <span className="fab-label">Add trade</span>
         <kbd className="fab-key">N</kbd>

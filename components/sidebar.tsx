@@ -54,6 +54,21 @@ export const SECTION_ITEMS: readonly NavItem[] = [...NAV_ITEMS, ADMIN_ITEM];
 export const isActive = (path: string, href: string) =>
   href === "/" ? path === "/" : path === href || path.startsWith(`${href}/`);
 
+/**
+ * Every navigation link here carries `unstable_dynamicOnHover`, which needs `experimental.dynamicOnHover`
+ * in `next.config.ts` to have any effect.
+ *
+ * These links are the app's only way between sections, and a plain `<Link>` prefetch on a dynamic route
+ * stops at the nearest `loading.tsx` — so what arrived early was the skeleton, while the route's own
+ * JavaScript (70–95 KB, measured) started downloading after the click. With this prop the hover itself
+ * starts the full prefetch, so a click lands on a page that is already in memory. It is on the phone nav
+ * and the sheet as well, where the same prop is what a `touchstart` upgrades in the same way.
+ *
+ * Deliberately *not* `prefetch={true}`: every one of these links is in the viewport at load, so a full
+ * prefetch of each would pull the whole app (~600 KB) down before the first number is read. The default
+ * prefetch stays, which is the cheap one, and the full fetch waits for a pointer that actually goes
+ * somewhere near the link.
+ */
 export function Sidebar({ isAdmin }: { isAdmin?: boolean }) {
   const path = usePathname();
   const items = isAdmin ? SECTION_ITEMS : NAV_ITEMS;
@@ -66,7 +81,7 @@ export function Sidebar({ isAdmin }: { isAdmin?: boolean }) {
       <div className="section-label">Workspace</div>
       <nav>
         {items.map(([href, label, Icon]) => (
-          <Link key={href} href={href} className={cn("nav-item", isActive(path, href) && "active")}>
+          <Link key={href} href={href} unstable_dynamicOnHover className={cn("nav-item", isActive(path, href) && "active")}>
             <Icon size={17} />
             <span className="nav-text">{label}</span>
           </Link>
@@ -96,12 +111,12 @@ export function MobileNav({ isAdmin }: { isAdmin?: boolean }) {
   return (
     <>
       <nav className="mobile-nav" aria-label="Sections">
-        <Link href={homeHref} className={cn("nav-item", isActive(path, homeHref) && "active")}>
+        <Link href={homeHref} unstable_dynamicOnHover className={cn("nav-item", isActive(path, homeHref) && "active")}>
           <HomeIcon size={18} />
           <span className="nav-text">{homeLabel}</span>
         </Link>
         {primary.map(([href, label, Icon]) => (
-          <Link key={href} href={href} className={cn("nav-item", isActive(path, href) && "active")}>
+          <Link key={href} href={href} unstable_dynamicOnHover className={cn("nav-item", isActive(path, href) && "active")}>
             <Icon size={18} />
             <span className="nav-text">{label}</span>
           </Link>
@@ -133,6 +148,7 @@ export function MobileNav({ isAdmin }: { isAdmin?: boolean }) {
               <Link
                 key={href}
                 href={href}
+                unstable_dynamicOnHover
                 onClick={() => setOpen(false)}
                 className={cn("nav-item", isActive(path, href) && "active")}
               >

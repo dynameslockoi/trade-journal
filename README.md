@@ -426,6 +426,21 @@ parts make that work, and they are worth knowing about before touching a page's 
   never a different answer: a key it could not read is simply left out and fetched by the page the way it
   always was, and the cache outranks it whenever it holds anything.
 
+A page change also has to stop waiting on the server, which is a separate problem with the same shape.
+Every route here is dynamic (`ƒ` in the build output, because the layout reads the session), and Next's
+defaults treat dynamic as uncacheable: `staleTimes.dynamic` is 0, so a segment is never reused and
+walking back to a page you were just on asked the server for it again — flashing that route's
+`loading.tsx` over rows the browser was already holding — while a hovered link only prefetched as far as
+the nearest `loading.tsx`, so the 70–95 KB of route JavaScript measured per page
+(`.next/diagnostics/route-bundle-stats.json`) only began downloading after the click. So
+`next.config.ts` gives `experimental.staleTimes.dynamic` 30 seconds, which serves a page visited in the
+last half-minute from the browser, and turns on `experimental.dynamicOnHover` with
+`unstable_dynamicOnHover` on every nav link, so resting the pointer on a section starts fetching it.
+Neither changes what a page reads: the figures still come from the client cache with its own TTL and
+`invalidate()`, and a hard load still renders on the server with its rows in the first HTML. Both are
+production-only — Next disables link prefetching in `next dev` — so the difference has to be judged on a
+production build, and `npm run test:perf` fails if either setting is removed.
+
 Two server-side details matter for the same reason: the middleware and the root layout check the session
 with `getClaims()` (the session's JWT is verified against the project's cached signing keys) instead of
 `getUser()` (a request to the auth server), and the layout reads your display name from the token rather

@@ -32,6 +32,17 @@ const data = read("lib/data.ts");
 const browser = read("lib/supabase/browser.ts");
 const shell = read("components/app-shell.tsx");
 const dashboard = read("app/page.tsx");
+const config = read("next.config.ts");
+const analytics = read("app/analytics/page.tsx");
+const sidebar = read("components/sidebar.tsx");
+const quickAdd = read("components/quick-add.tsx");
+/**
+ * Source with its comments removed, so a check is about the code and not about the prose beside it —
+ * these files explain their own decisions, and an explanation that names a prop must not be mistaken
+ * for the prop being there.
+ */
+const code = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -79,6 +90,35 @@ check("and nothing arms an idle callback to fetch them", shell.includes("request
 
 /* --------------------------------------------------- the chart library stays out of the first load */
 check("the dashboard's chart is still a dynamic import", /dynamic\(\(\) => import\("@\/components\/equity-chart"\)/.test(dashboard), true);
+
+/* ------------------------------------------- the heavy blocks do not all build in the first frame */
+// The analytics page draws ten charts plus the sector strip and eight breakdown tables, and building
+// them together blocked the main thread for 200–700 ms on a production build — long after the page
+// had painted, which is what made switching sections feel stuck. Every one of those blocks is wrapped
+// in `OnScreen` so it builds as it is scrolled to, and that is invisible in behaviour: the page
+// renders the same, just not all at once. Counted per JSX site, so the eight-table map is one of
+// them, and an edit that adds a ninth table inside the map is already covered.
+const heavyUses = (code(analytics).match(/<(PnlBars|AnalyticsEquityCurve|RDistributionChart|SectorSentiment|Breakdown)\b/g) ?? []).length;
+const deferred = (code(analytics).match(/<OnScreen\b/g) ?? []).length;
+check("every heavy block on the analytics page is deferred until it is scrolled to", deferred, heavyUses);
+
+/* --------------------------------------------------- a page change does not wait on the server */
+// The other half of "the rows are already in the browser": the navigation itself. Every route here is
+// dynamic, so Next's defaults leave nothing reusable — a segment cannot be reused (`staleTimes.dynamic`
+// is 0) and a prefetch of one stops at its `loading.tsx`. Both settings are invisible in behaviour: the
+// app renders identically whether a page was reused or refetched, and dropping either would come back
+// only as the pause between pages that the rest of this file exists to prevent.
+check("a visited segment stays reusable for a walk around the app", /staleTimes:\s*\{\s*dynamic:\s*\d+/.test(config), true);
+check("a hovered link may prefetch the whole route", /dynamicOnHover:\s*true/.test(config), true);
+// Every link in the shell, not most of them: one left without it is a section that still waits.
+const sidebarLinks = (code(sidebar).match(/<Link/g) ?? []).length;
+const sidebarOptIns = (code(sidebar).match(/unstable_dynamicOnHover/g) ?? []).length;
+check("every sidebar link opts into the hover prefetch", sidebarOptIns, sidebarLinks);
+check("and so does the quick-add button", code(quickAdd).includes("unstable_dynamicOnHover"), true);
+// `prefetch` on these links would pull every route down on load, which is the opposite of what the
+// setting is for: they are all in the viewport from the first paint. The upgrade is meant to wait for
+// a pointer that actually goes near a link, so the default prefetch stays as it is.
+check("the sidebar does not full-prefetch every route at load", /\bprefetch\b/.test(code(sidebar)), false);
 
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nAll performance checks passed");
 process.exit(failures ? 1 : 0);
