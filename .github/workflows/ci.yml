@@ -7,10 +7,9 @@
 # setup screen when Supabase is unconfigured, so a build without `.env` is a real build.
 name: CI
 
-on:
-  push:
-    branches: [main]
-  pull_request:
+# Both events, unfiltered: a push is verified before it ever becomes a pull request, and the same
+# commit is verified again on the pull request's own merge ref — the ref that would actually land.
+o: [push, pull_request]
 
 # A newer push to the same branch makes the running one's answer stale; cancel it instead of
 # paying for an answer nobody will read.
