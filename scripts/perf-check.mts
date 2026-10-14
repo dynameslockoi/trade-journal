@@ -94,10 +94,12 @@ check("the dashboard's chart is still a dynamic import", /dynamic\(\(\) => impor
 /* ------------------------------------------- the heavy blocks do not all build in the first frame */
 // The analytics page draws ten charts plus the sector strip and eight breakdown tables, and building
 // them together blocked the main thread for 200–700 ms on a production build — long after the page
-// had painted, which is what made switching sections feel stuck. Every one of those blocks is wrapped
-// in `OnScreen` so it builds as it is scrolled to, and that is invisible in behaviour: the page
-// renders the same, just not all at once. Counted per JSX site, so the eight-table map is one of
-// them, and an edit that adds a ninth table inside the map is already covered.
+// had painted, which is what made switching sections feel stuck. The page is four views now rather
+// than one column (see `lib/analytics-views.ts`), but the rule that made it fast is unchanged: every
+// one of those blocks is wrapped in `OnScreen` so it builds as it is scrolled to, and that is
+// invisible in behaviour — the page renders the same, just not all at once. Counted per JSX site, so
+// the eight dimensions are two of them (a chart and its table, drawn by `DimensionPair`), and a ninth
+// dimension added to the record is already covered.
 const heavyUses = (code(analytics).match(/<(PnlBars|AnalyticsEquityCurve|RDistributionChart|SectorSentiment|Breakdown)\b/g) ?? []).length;
 const deferred = (code(analytics).match(/<OnScreen\b/g) ?? []).length;
 check("every heavy block on the analytics page is deferred until it is scrolled to", deferred, heavyUses);

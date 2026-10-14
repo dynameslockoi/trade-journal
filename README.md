@@ -45,6 +45,26 @@ through `/auth/callback`, which exchanges the code for a session. A display name
 profile and shown in the top bar. Every page except the auth pages requires a session, and the
 middleware keeps the session cookie fresh on every request.
 
+**One page, two panels.** `/login` and `/signup` are the same card opened on its own half, so switching
+between them is an animation rather than a navigation — the outgoing panel slides and fades while the
+incoming one arrives, the card grows or shrinks to the panel's measured height, and the button on the
+seam turns. On a phone the branded half becomes a 168px banner with the control on its lower edge. The
+inactive half is `inert`, so nothing on it can be clicked or tabbed into while it is off screen.
+
+**Forgotten passwords are self-service.** The sign-in panel's **Forgot password?** step asks Supabase to
+send a recovery link, which returns through `/auth/callback?next=/reset-password` — the same code
+exchange as a confirmation mail, forwarded to the page that sets a new password. That page asks for the
+session before it draws a form, so a link that expired, was already used, or was opened in a browser
+other than the one that asked for it gets an explanation and a fresh link instead of a form that cannot
+save.
+
+**A dead session lands on that page too.** When the session cookie no longer verifies, the middleware
+sends it to the sign-in panel with "Your session has ended" rather than to a bare form; when a token
+still verifies but no longer has an account behind it, the app shell signs it out and does the same.
+That is separate from the access gate ([`components/access-denied.tsx`](components/access-denied.tsx)),
+which is about the *account* — a suspended or expired one stays signed in and is told why the journal is
+closed.
+
 **Sign-up is invitation only.** A code is required, and it is checked by the database rather than by the
 form — a trigger on `auth.users` refuses an account that arrives without a usable code, so posting
 straight to the auth API does not get around it. Codes are stored as upper-case letters and digits, so
@@ -107,19 +127,28 @@ gallery. Deleting a trade removes its screenshots from storage as well.
 
 ### Analytics (`/analytics`)
 
-Where the edge actually comes from, in three layers:
+Where the edge actually comes from, in **four views** behind one tab strip — they read the same filtered
+rows, so switching is a repaint rather than a page load, and the view travels in the URL (`?view=timing`)
+so any of them can be linked to or bookmarked. `?view` is written with the native history API, and a
+strategy link from the dashboard opens the view that draws that strategy.
 
-1. **Eight P&L charts, paired by the question they answer** — *Strategy* with *Sector* (what you trade),
-   *Hourly* with *Weekday* (when), *Holding Period* with *Position Lot* (how long and how big), *IPO* with
-   *Setup Quality* (how the trade came to you, and how it was executed). Banded dimensions draw a fixed
-   axis so bands do not reshuffle under you, the hourly axis skips the 12:30–14:30 break, and sectors are
-   ordered by what they actually paid. *IPO P&L* compares allocation trades against open-market ones.
-2. **Equity Curve** and **R Distribution**, plus a **Sector Sentiment** strip: one row per sector, one
-   column per month, each cell that sector's P&L in that month with a sparkline of its running total —
-   so a sector warming up or going cold is visible instead of only its all-time total. Clicking a cell
-   filters the page to that sector's month.
-3. **Eight breakdown tables** under the same headings, with per-group trades, win rate, average and P&L,
-   and subtotals per session band on the hourly table.
+1. **Overview** — the eight headline metrics (net P&L, win rate, profit factor, expectancy, max drawdown
+   quoted against the capital behind it, average R, best win and loss streaks) with the **Equity Curve**
+   and the **R Distribution**.
+2. **Setups** — *Strategy*, *Setup Quality* and *IPO*: what you trade and how the trade came to you.
+   *IPO P&L* compares allocation trades against open-market ones.
+3. **Timing** — *Hourly*, *Weekday*, *Holding Period* and *Position Lot*: when you trade, how long you
+   hold, how big you go. The hourly axis skips the 12:30–14:30 break and its table subtotals per Bursa
+   session.
+4. **Sectors** — the sector P&L and the **Sector Sentiment** strip: one row per sector, one column per
+   month, each cell that sector's P&L in that month with a sparkline of its running total, so a sector
+   warming up or going cold is visible instead of only its all-time total. Clicking a cell filters the
+   page to that sector's month.
+
+Every dimension is drawn as a pair — its chart beside its own breakdown table, with per-group trades,
+win rate, average and P&L — because the table is how a bar is told apart from a hundred trades. Banded
+dimensions draw a fixed axis so bands do not reshuffle under you, and sectors are ordered by what they
+actually paid.
 
 Every chart, table and percentage respects the same filter bar, and the capital used for drawdown comes
 from the cash ledger.
@@ -312,8 +341,12 @@ login while "Confirm email" stays on for everybody signing up themselves.
 
 In **Authentication → URL Configuration**, set the **Site URL** to where the app runs and add the
 origins you sign in from as **Redirect URLs** (`http://localhost:3000/**` for local work, plus your
-deployed URL). Email confirmation returns to `/auth/callback`, and anything missing from that list is
-refused by Supabase before the app ever sees it.
+deployed URL). Email confirmation and password recovery both return to `/auth/callback`, and anything
+missing from that list is refused by Supabase before the app ever sees it — a wildcard per origin is
+easiest, since the recovery link also carries a `?next=` destination.
+
+The mail itself is Supabase's own: **Authentication → Email Templates → Reset password** keeps its
+default link. What matters is the destination it is given, and the app sets that per request.
 
 ### 4. Configure the environment
 
@@ -472,6 +505,15 @@ that quietly stopped applying — is worse than a crash:
   again, and which of the three notices the band is willing to draw. It also reads `supabase/admin.sql` and asserts the parts that would fail
   silently — that the code normalisation the form uses is the one the database uses, and that the guard
   which stops a customer promoting themselves is still there and still not `security definer`.
+- **`scripts/auth-check.mts`** — signing in, which the compiler and every other check are blind to. It
+  pins the card's behaviour where it lives: both panels mounted with the seam control switching in either
+  direction, the inactive panel `inert` and `aria-hidden` and refusing the pointer, the height measured
+  and transitioned with the pre-measurement floor gated on `data-ready` (an ungated one outranks the
+  inline height and makes the card pop instead of grow), the seam at 44% matching the grid's two columns,
+  and the loading state — the spinner, the disabled button, and every path that ends a request clearing
+  the wait. It also executes the rules a URL can reach: `safeNextPath` (an open redirect on an auth route
+  is how a phishing mail borrows the domain it is trusted under) and `isStaleSession` (which must catch a
+  dead token and *not* a dropped connection), and checks the recovery link's two halves still agree.
 - **`scripts/demo-check.mts`** — recomputes the generated demo journal from its own prices: gross P&L,
   risk from the stop, R measured after charges, board-lot sizes, entry sessions, no entry or exit on a
   weekend or in the future, exits never before their entry, an open position carrying no result, and the
@@ -490,6 +532,13 @@ that quietly stopped applying — is worse than a crash:
   buttons. It pins the nav into the caption's row rather than an overlay, the month and year dropdowns
   with the native `<select>` hidden behind the label, the grid opting out of the journal's own `th`/`td`
   rules, and the circular chosen day.
+- **`scripts/analytics-check.mts`** — the four views, which a rendered page cannot be asked about: that
+  each of the eight dimensions is charted by exactly one view, that no view is an empty tab, that a
+  chart and its table are drawn by the one component that draws them from the same `panel.rows`, that
+  the sector strip belongs to Sectors and nowhere else, and that switching writes the address bar
+  without navigating (a `router.replace` would send the switch back through the server render). It also
+  executes the landing rules a URL can reach: an explicit `?view=` beating a strategy link, a strategy
+  link opening Setups, an unknown view falling back, and a switch keeping the filters that travel in it.
 - **`scripts/perf-check.mts`** — the two decisions that keep the first load small, neither of which is
   visible in any behaviour: the layout reads the shared rows on the server before it sends the page, and
   the Supabase browser client is reached through the on-demand accessor instead of imported outright. It
@@ -512,7 +561,8 @@ that quietly stopped applying — is worse than a crash:
 
 ```
 app/                      routes (App Router)
-  login, signup           auth pages
+  login, signup           one card, two panels (components/auth-card.tsx)
+  reset-password          where a recovery link lands
   auth/callback, signout  session exchange and sign-out
   page.tsx                dashboard
   journal/                list, new, [id] detail, [id]/edit
@@ -528,13 +578,15 @@ lib/
   query-cache.ts          the client cache: TTL, de-duped requests, invalidation, the server's seed
   admin.ts                the admin RPCs: me(), the overview, access and invitation writes
   access.ts               who may sign in, and which invitation codes still work
+  session.ts              a dead session, and where an emailed link may return to
   fees.ts                 the Bursa cost model and the IPO subscription model
   trading.ts              trade types, filters, stats, grouping, dates, zakat
   dates.ts                Malaysian-time helpers
   supabase/               browser (imported on demand), server and middleware clients
   utils.ts                cn()
 supabase/                 the SQL files to run, in order
-scripts/                  the check scripts (fees, calculations, access, demo, cache, picker, performance, SQL)
+scripts/                  the check scripts (fees, calculations, access, auth, demo, cache, picker,
+                          analytics, performance, SQL)
   demo-data.mts           generates the demo journal; `npm run demo:seed` / `demo:clear`
 proxy.ts                  keeps the Supabase session fresh
 next.config.ts            security headers

@@ -1,6 +1,7 @@
 "use client";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import { usePathname, useSearchParams } from "next/navigation";
 import { KEYS, loadAccounts, loadFlows, loadStrategies, loadTags, loadTrades, useTradeTagsMap } from "@/lib/data";
 import { useCachedQuery } from "@/lib/query-cache";
 import { FilterBar, applyFilters, emptyFilters, type Filters } from "@/components/filter-bar";
@@ -11,9 +12,11 @@ import { CardSkeleton, StatsSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SectorSentiment } from "@/components/sector-sentiment";
 import { OnScreen } from "@/components/on-screen";
 import { toast } from "sonner";
+import { VIEWS, VIEW_DIMENSIONS, resolveView, viewHref, type Dimension, type View } from "@/lib/analytics-views";
 
 /**
  * Ten charts, one library, loaded once — as its own chunk. See the doc comment in
@@ -139,6 +142,18 @@ function tableHeight(rows: GroupRow[]) {
   return rows.length * 35 + 60;
 }
 
+/** One dimension's two halves: the chart card, and the breakdown it is read against. */
+type DimensionPanel = {
+  title: string;
+  tableTitle: string;
+  rows: GroupRow[];
+  hint: string;
+  tickFontSize: number;
+  tickInterval?: number;
+  /** Labels a row's Bursa session, for the breakdown's subtotal bands. */
+  sectionOf?: (name: string) => string | null;
+};
+
 export default function Analytics() {
   // Shared with the dashboard and the journal: the charts and the table read the same rows.
   const tradesQ = useCachedQuery<Trade[]>(KEYS.trades, loadTrades);
@@ -153,9 +168,47 @@ export default function Analytics() {
   const tags = tagsQ.data ?? [];
   // An unreadable ledger is not a broken page: the capital line falls back to opening balances.
   const flows = (flowsQ.error ? null : flowsQ.data) as CashFlow[] | null;
-  const [filters, setFilters] = useState<Filters>({ ...emptyFilters });
+  // The dashboard's strategy table links here with the strategy it names ("?strategy=<id>"), so the
+  // page opens already filtered to that setup. Read as the initial state so the first paint is
+  // right, and again in the effect below so following a second link while already here still lands.
+  const params = useSearchParams();
+  const pathname = usePathname();
+  const strategyParam = params.get("strategy") ?? "";
+  const [filters, setFilters] = useState<Filters>(() => ({ ...emptyFilters, strategy: strategyParam }));
+  // The view travels in the URL, so one is linkable — and a strategy link opens the view that draws
+  // it (see `resolveView`) instead of landing on Overview and hiding the strategy it named.
+  const [view, setView] = useState<View>(() => resolveView(params.get("view"), strategyParam));
+  useEffect(() => {
+    if (!strategyParam) return;
+    setFilters(f => (f.strategy === strategyParam ? f : { ...f, strategy: strategyParam }));
+  }, [strategyParam]);
+  /**
+   * The strip follows the address bar. That is what covers the ways a URL arrives at a view the strip
+   * is not showing: a link that names one, a strategy link (which implies Setups, see `resolveView`),
+   * and a click on the section you are already in — the sidebar takes you to the bare `/analytics`
+   * again, and arriving there from Timing should be Overview, not a stale pane under a clean URL. A
+   * switch made by `chooseView` sets the same view back and changes nothing, so the two cannot fight.
+   */
+  useEffect(() => {
+    const fromUrl = resolveView(params.get("view"), strategyParam);
+    setView(current => (current === fromUrl ? current : fromUrl));
+  }, [params, strategyParam]);
   const loading = tradesQ.loading || accountsQ.loading || flowsQ.loading;
   const loadError = tradesQ.error ?? accountsQ.error ?? strategiesQ.error ?? tagsQ.error ?? tradeTagsQ.error;
+
+  /**
+   * Switch view, and put it in the address bar without a navigation.
+   *
+   * `router.replace` would send the switch through the layout's server render — the same seeded row
+   * reads the first HTML pays for — to repaint a page that already holds its data. Writing the URL
+   * with the native history API is Next's documented way to update it shallowly, and since the view
+   * is React state here rather than something read back out of `useSearchParams`, the strip switches
+   * immediately. Back therefore leaves the page rather than walking back through the views.
+   */
+  function chooseView(next: View) {
+    setView(next);
+    window.history.replaceState(null, "", viewHref(pathname, params.toString(), next));
+  }
 
   const ts = useMemo(() => applyFilters(all, filters, tradeTagsQ.map) as Trade[], [all, filters, tradeTagsQ.map]);
   // Money follows the filtered account's currency, falling back to the journal default (RM).
@@ -169,6 +222,71 @@ export default function Analytics() {
   const quality = useMemo(() => grouped(ts, "quality"), [ts]);
   const sector = useMemo(() => grouped(ts, "sector"), [ts]);
   const ipo = useMemo(() => grouped(ts, "ipo"), [ts]);
+
+  /**
+   * The eight dimensions, described once each so a chart and its table cannot drift apart: whichever
+   * view draws a dimension draws both halves of it, and `VIEW_DIMENSIONS` decides which view that is.
+   */
+  const panels: Record<Dimension, DimensionPanel> = {
+    strategy: {
+      title: "Strategy P&L",
+      tableTitle: "Strategy Breakdown",
+      rows: strategy,
+      hint: "By the setup each trade was tagged with.",
+      tickFontSize: 10,
+    },
+    sector: {
+      title: "Sector P&L",
+      tableTitle: "Sector Breakdown",
+      rows: sector,
+      hint: "Which Bursa sectors pay you — best first, sector by sector.",
+      tickFontSize: 8.5,
+    },
+    hour: {
+      title: "Hourly P&L",
+      tableTitle: "Hourly Breakdown",
+      rows: hour,
+      hint: "Which Bursa hour pays you — the axis skips the 12:30–14:30 break.",
+      tickFontSize: 9.5,
+      tickInterval: 0,
+      sectionOf: hourSessionLabel,
+    },
+    weekday: {
+      title: "Weekday P&L",
+      tableTitle: "Weekday Breakdown",
+      rows: weekday,
+      hint: "Which days of the week you give money back.",
+      tickFontSize: 10,
+    },
+    holding: {
+      title: "Holding Period P&L",
+      tableTitle: "Holding Period Breakdown",
+      rows: holding,
+      hint: "Does letting a winner run, or cutting it fast, actually pay?",
+      tickFontSize: 9.5,
+    },
+    lots: {
+      title: "Position Lot P&L",
+      tableTitle: "Position Lot Breakdown",
+      rows: lots,
+      hint: "Position lot — 100 shares each. The same size, every time?",
+      tickFontSize: 9.5,
+    },
+    ipo: {
+      title: "IPO P&L",
+      tableTitle: "IPO Breakdown",
+      rows: ipo,
+      hint: "Whether the allocations you were given pay better than buying on the open market.",
+      tickFontSize: 9.5,
+    },
+    quality: {
+      title: "Setup Quality P&L",
+      tableTitle: "Setup Quality Breakdown",
+      rows: quality,
+      hint: "The average of your 1–10 setup, execution and discipline scores.",
+      tickFontSize: 9.5,
+    },
+  };
 
   const rdist = useMemo(
     () => [[-5, -3], [-3, -2], [-2, -1], [-1, -.5], [-.5, 0], [0, .5], [.5, 1], [1, 2], [2, 3], [3, 5], [5, Infinity]].map(([a, b]) => ({
@@ -201,105 +319,131 @@ export default function Analytics() {
       <PageHeader title="Analytics" subtitle="Measure where your edge actually comes from." />
       <LoadError message={loadError} />
       <FilterBar filters={filters} setFilters={setFilters} accounts={accounts} strategies={strategies} tags={tags} />
-      {loadError ? null : loading ? <><StatsSkeleton rows={2} /><CardSkeleton lines={6} /></> : <>
-        <div className="grid four">
-          <StatCard label="Net P&L" value={formatMoney(stats.pnl, currency, true)} positive={stats.pnl >= 0} />
-          <StatCard label="Win Rate" value={`${stats.winRate.toFixed(1)}%`} />
-          <StatCard label="Profit Factor" value={stats.profitFactor === null ? "—" : stats.profitFactor.toFixed(2)} />
-          {hasR ? (
-            <StatCard label="Expectancy" value={`${avgR >= 0 ? "+" : ""}${avgR.toFixed(2)}R`} sub={`mean of ${stats.rCount} trade${stats.rCount === 1 ? "" : "s"} with a stop`} positive={avgR >= 0} />
-          ) : (
-            <StatCard label="Expectancy" value={formatMoney(perTrade, currency, true)} sub="per trade · no stop losses recorded" positive={perTrade === null ? undefined : perTrade >= 0} />
-          )}
-        </div>
-        <div className="grid four">
-          {/* Money that came out is red wherever it is shown, the same as the net and gross cards
-              above — a drawdown of zero is not a loss, so only a real one takes the tone. */}
-          <StatCard label="Max Drawdown" value={formatMoney(-stats.maxDrawdown, currency)} sub={ddSub} positive={stats.maxDrawdown > 0 ? false : undefined} />
-          <StatCard label="Avg R" value={hasR ? `${avgR >= 0 ? "+" : ""}${avgR.toFixed(2)}R` : "—"} sub={hasR ? `stop recorded on ${stats.rCount} of ${ts.length}` : "needs a stop loss"} positive={hasR ? avgR >= 0 : undefined} />
-          <StatCard label="Best Win Streak" value={String(bestStreak(ts, true))} />
-          <StatCard label="Best Loss Streak" value={String(bestStreak(ts, false))} />
+
+      {/* Four questions, four views — see `lib/analytics-views.ts` for what each one owns and why the
+          division is a tab strip on one route rather than four routes of its own. */}
+      <Tabs value={view} onValueChange={value => chooseView(value as View)}>
+        <div className="tabs-bar">
+          <TabsList>
+            {VIEWS.map(([value, label]) => (
+              <TabsTrigger key={value} value={value}>{label}</TabsTrigger>
+            ))}
+          </TabsList>
         </div>
 
-        {/* Paired by the question they answer — what you trade, when, how long, and how the trade
-            came to you — and an even count, so no row ends in half a row of empty space. */}
-        <div className="grid two">
-          {([
-            ["Strategy P&L", strategy, "By the setup each trade was tagged with.", 10],
-            ["Sector P&L", sector, "Which Bursa sectors pay you — best first, sector by sector.", 8.5],
-            ["Hourly P&L", hour, "Which Bursa hour pays you — the axis skips the 12:30–14:30 break.", 9.5, 0],
-            ["Weekday P&L", weekday, "Which days of the week you give money back.", 10],
-            ["Holding Period P&L", holding, "Does letting a winner run, or cutting it fast, actually pay?", 9.5],
-            ["Position Lot P&L", lots, "Position lot — 100 shares each. The same size, every time?", 9.5],
-            ["IPO P&L", ipo, "Whether the allocations you were given pay better than buying on the open market.", 9.5],
-            ["Setup Quality P&L", quality, "The average of your 1–10 setup, execution and discipline scores.", 9.5],
-          ] as const).map(([title, data, hint, tickFontSize, tickInterval]) => (
-            <Card key={title}>
-              <CardContent>
-                <b>{title}</b>
-                <div className="muted text-[11px] mt-0.5">{hint}</div>
-                {/* The title and the hint stay, so the page still reads as a page; the chart is the
-                    expensive part and most of these cards start below the fold. 290 = the chart's
-                    280 plus the 10 px margin above it, so nothing moves when it arrives. */}
-                <OnScreen height={290}>
-                  <PnlBars data={data} currency={currency} tickFontSize={tickFontSize} tickInterval={tickInterval} />
-                </OnScreen>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        {loadError ? null : loading ? (
+          // The strip stays live while the rows arrive, so a view can be chosen before it is drawn.
+          <div className="grid">
+            {view === "overview" && <StatsSkeleton rows={2} />}
+            <CardSkeleton lines={6} />
+          </div>
+        ) : (
+          <>
+            <TabsContent value="overview" className="grid">
+              <div className="grid four">
+                <StatCard label="Net P&L" value={formatMoney(stats.pnl, currency, true)} positive={stats.pnl >= 0} />
+                <StatCard label="Win Rate" value={`${stats.winRate.toFixed(1)}%`} />
+                <StatCard label="Profit Factor" value={stats.profitFactor === null ? "—" : stats.profitFactor.toFixed(2)} />
+                {hasR ? (
+                  <StatCard label="Expectancy" value={`${avgR >= 0 ? "+" : ""}${avgR.toFixed(2)}R`} sub={`mean of ${stats.rCount} trade${stats.rCount === 1 ? "" : "s"} with a stop`} positive={avgR >= 0} />
+                ) : (
+                  <StatCard label="Expectancy" value={formatMoney(perTrade, currency, true)} sub="per trade · no stop losses recorded" positive={perTrade === null ? undefined : perTrade >= 0} />
+                )}
+              </div>
+              <div className="grid four">
+                {/* Money that came out is red wherever it is shown, the same as the net and gross cards
+                    above — a drawdown of zero is not a loss, so only a real one takes the tone. */}
+                <StatCard label="Max Drawdown" value={formatMoney(-stats.maxDrawdown, currency)} sub={ddSub} positive={stats.maxDrawdown > 0 ? false : undefined} />
+                <StatCard label="Avg R" value={hasR ? `${avgR >= 0 ? "+" : ""}${avgR.toFixed(2)}R` : "—"} sub={hasR ? `stop recorded on ${stats.rCount} of ${ts.length}` : "needs a stop loss"} positive={hasR ? avgR >= 0 : undefined} />
+                <StatCard label="Best Win Streak" value={String(bestStreak(ts, true))} />
+                <StatCard label="Best Loss Streak" value={String(bestStreak(ts, false))} />
+              </div>
 
-        <div className="grid two">
-          <Card>
-            <CardContent>
-            <b>Equity Curve</b>
-            <OnScreen height={310}><AnalyticsEquityCurve data={eq} /></OnScreen>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent>
-            <b>R Distribution</b>
-            <OnScreen height={310}><RDistributionChart data={rdist} /></OnScreen>
-            </CardContent>
-          </Card>
-        </div>
+              <div className="grid two">
+                <Card>
+                  <CardContent>
+                    <b>Equity Curve</b>
+                    <OnScreen height={310}><AnalyticsEquityCurve data={eq} /></OnScreen>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent>
+                    <b>R Distribution</b>
+                    <OnScreen height={310}><RDistributionChart data={rdist} /></OnScreen>
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
 
-        {/* Full width, because a month per column needs the room the two-up grid cannot give it. */}
-        {/* 320 px is the strip's height as measured in the browser at the default 24-month window
-            (317 px, four sectors). It is an estimate because the rows are the sectors you have, so a
-            heavier journal reserves a little less than it needs — and the correction happens while
-            the strip is still at least 400 px below the fold, where nobody sees it move. */}
-        <OnScreen height={320}>
-          <SectorSentiment
-            trades={ts}
-            currency={currency}
-            onPickMonth={({ from, to, label, sector }) => {
-              setFilters(f => ({ ...f, from, to, sector }));
-              toast.info(`Filtered to ${sector ? `${sector} · ` : ""}${label.split(" · ").pop()}`);
-            }}
-          />
-        </OnScreen>
+            <TabsContent value="setups" className="grid">
+              {/* Each dimension's chart sits beside its own table, so the bar and the trades behind it
+                  are read in one glance rather than one view apart. */}
+              <div className="grid two breakdown-grid">
+                {VIEW_DIMENSIONS.setups.map(key => (
+                  <DimensionPair key={key} panel={panels[key]} currency={currency} />
+                ))}
+              </div>
+            </TabsContent>
 
-        {/* The same pairing and the same order as the charts above, so a card and its table are
-            found in the same place on the page. */}
-        <div className="grid two breakdown-grid">
-          {([
-            ["Strategy Breakdown", strategy, undefined],
-            ["Sector Breakdown", sector, undefined],
-            ["Hourly Breakdown", hour, hourSessionLabel],
-            ["Weekday Breakdown", weekday, undefined],
-            ["Holding Period Breakdown", holding, undefined],
-            ["Position Lot Breakdown", lots, undefined],
-            ["IPO Breakdown", ipo, undefined],
-            ["Setup Quality Breakdown", quality, undefined],
-          ] as const).map(([title, rows, sectionOf]) => (
-            <OnScreen key={title} height={tableHeight(rows)}>
-              <Breakdown title={title} rows={rows} currency={currency} sectionOf={sectionOf} />
-            </OnScreen>
-          ))}
-        </div>
-      </>}
+            <TabsContent value="timing" className="grid">
+              <div className="grid two breakdown-grid">
+                {VIEW_DIMENSIONS.timing.map(key => (
+                  <DimensionPair key={key} panel={panels[key]} currency={currency} />
+                ))}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="sectors" className="grid">
+              <div className="grid two breakdown-grid">
+                <DimensionPair panel={panels.sector} currency={currency} />
+              </div>
+              {/* Full width, because a month per column needs the room the two-up grid cannot give it. */}
+              {/* 320 px is the strip's height as measured in the browser at the default 24-month window
+                  (317 px, four sectors). It is an estimate because the rows are the sectors you have, so a
+                  heavier journal reserves a little less than it needs — and the correction happens while
+                  the strip is still at least 400 px below the fold, where nobody sees it move. */}
+              <OnScreen height={320}>
+                <SectorSentiment
+                  trades={ts}
+                  currency={currency}
+                  onPickMonth={({ from, to, label, sector }) => {
+                    setFilters(f => ({ ...f, from, to, sector }));
+                    toast.info(`Filtered to ${sector ? `${sector} · ` : ""}${label.split(" · ").pop()}`);
+                  }}
+                />
+              </OnScreen>
+            </TabsContent>
+          </>
+        )}
+      </Tabs>
     </div>
+  );
+}
+
+/**
+ * One dimension's two halves, drawn in this order and never apart: the chart card, then the
+ * breakdown table of the same rows. Both come from one `panels` entry, which is what makes it
+ * impossible for a chart to be moved to another view while its table stays behind.
+ */
+function DimensionPair({ panel, currency }: { panel: DimensionPanel; currency?: string | null }) {
+  return (
+    <>
+      <Card>
+        <CardContent>
+          <b>{panel.title}</b>
+          <div className="muted text-[11px] mt-0.5">{panel.hint}</div>
+          {/* The title and the hint stay, so the page still reads as a page; the chart is the
+              expensive part and most of these cards start below the fold. 290 = the chart's
+              280 plus the 10 px margin above it, so nothing moves when it arrives. */}
+          <OnScreen height={290}>
+            <PnlBars data={panel.rows} currency={currency} tickFontSize={panel.tickFontSize} tickInterval={panel.tickInterval} />
+          </OnScreen>
+        </CardContent>
+      </Card>
+      <OnScreen height={tableHeight(panel.rows)}>
+        <Breakdown title={panel.tableTitle} rows={panel.rows} currency={currency} sectionOf={panel.sectionOf} />
+      </OnScreen>
+    </>
   );
 }
 
