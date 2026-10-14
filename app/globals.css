@@ -881,6 +881,8 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
   background: var(--tile); border: 1px solid var(--border); border-radius: var(--r-md);
 }
 .sector-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+/* The sector and the sub-sector under it, side by side while the dialog has the room for both. */
+.sector-row-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
 
 /* The card shows the latest movement only; the whole ledger lives in the dialog. */
 .cashflow-latest {

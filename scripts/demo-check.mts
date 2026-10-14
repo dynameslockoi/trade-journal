@@ -13,6 +13,7 @@ import {
   calculateGrossPnl,
   calculateR,
   calculateRisk,
+  isSubSectorOf,
   roundMoney,
   sessionForTime,
 } from "../lib/trading.ts";
@@ -58,6 +59,10 @@ check("the journal has enough trades to look alive", dataset.trades.length >= 45
 check("some trades are still open", dataset.trades.some(t => t.exit_at === null), "true");
 check("some trades came from IPO applications", dataset.trades.some(t => t.is_ipo), "true");
 check("more than one sector is represented", new Set(dataset.trades.map(t => t.sector)).size >= 8, "true");
+// The sub-sector is the half that makes the sector chart finer, so the demo has to exercise it:
+// several of them, each one filed under the sector it actually belongs to.
+check("more than one sub-sector is represented", new Set(dataset.trades.map(t => t.sub_sector)).size >= 8, "true");
+check("every demo sub-sector belongs to its sector", dataset.trades.filter(t => !isSubSectorOf(t.sector, t.sub_sector)).length, 0);
 const closed = dataset.trades.filter(t => t.exit_at);
 check("some exits are intraday", closed.some(t => t.exit_at!.slice(0, 10) === t.entry_at.slice(0, 10)), "true");
 check("some are held for weeks", closed.some(t => t.exit_at!.slice(0, 10) > t.entry_at.slice(0, 10)), "true");

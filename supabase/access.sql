@@ -14,7 +14,8 @@
 -- run on a schedule: the same stored dates that label the account on the admin page are the ones the
 -- database now checks.
 --
--- Run once in the Supabase SQL editor — after schema.sql, cashflow.sql, sectors.sql, hardening.sql
+-- Run once in the Supabase SQL editor — after schema.sql, cashflow.sql, sectors.sql, subsectors.sql,
+-- hardening.sql
 -- and admin.sql, and before create-user.sql (which runs last). It is re-runnable: every policy is
 -- dropped and created again under the same name.
 --

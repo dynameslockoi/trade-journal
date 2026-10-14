@@ -20,6 +20,8 @@ export type Trade = {
   session?: string | null;
   /** Bursa sector the stock belongs to — see `BURSA_SECTORS`. */
   sector?: string | null;
+  /** Bursa sub-sector within `sector` — see `SUB_SECTORS`. */
+  sub_sector?: string | null;
   /** True when the position came from an IPO allocation rather than a market buy. */
   is_ipo?: boolean | null;
   mae?: number | string | null;
@@ -150,6 +152,79 @@ export const BURSA_SECTORS = [
   "Closed-end Fund",
 ] as const;
 
+/**
+ * Bursa's sub-sectors, filed under the sector each one belongs to.
+ *
+ * The exchange classifies a stock twice: into one of the sectors above, and into a sub-sector that
+ * says what the company actually does. Technology is the clearest case — Semiconductors, Software,
+ * Technology Equipment and Digital Services sit inside it, and their cycles are not the same cycle —
+ * so "Technology" alone is the coarser half of an answer the exchange already gives finer. The
+ * labels are the ones Bursa publishes and Malaysian market data follows; a sector with one
+ * registered sub-sector (Construction, Plantation, Property, REITs, SPAC) keeps that name rather
+ * than being drawn as a list of one.
+ *
+ * Kept here beside `BURSA_SECTORS` because both are the exchange's taxonomy, and both change there:
+ * a new sub-sector is a one-line edit, and the database column takes any text (see
+ * `supabase/subsectors.sql`), so nothing has to migrate when the exchange adds one.
+ */
+export const SUB_SECTORS: Record<string, readonly string[]> = {
+  "Construction": ["Construction"],
+  "Consumer Products & Services": [
+    "Agricultural Products",
+    "Automotive",
+    "Consumer Services",
+    "Food & Beverages",
+    "Household Goods",
+    "Personal Goods",
+    "Retailers",
+    "Travel, Leisure & Hospitality",
+  ],
+  "Energy": [
+    "Energy Infrastructure, Equipment & Services",
+    "Oil & Gas Producers",
+    "Other Energy Resources",
+    "Renewable Energy",
+  ],
+  "Financial Services": ["Banking", "Insurance", "Other Financials"],
+  "Health Care": ["Health Care Equipment & Services", "Health Care Providers", "Pharmaceuticals"],
+  "Industrial Products & Services": [
+    "Auto Parts",
+    "Building Materials",
+    "Chemicals",
+    "Diversified Industrials",
+    "Industrial Engineering",
+    "Industrial Materials, Components & Equipment",
+    "Industrial Services",
+    "Metals",
+    "Packaging Materials",
+    "Wood & Wood Products",
+  ],
+  "Plantation": ["Plantation"],
+  "Property": ["Property"],
+  "Real Estate Investment Trusts": ["Real Estate Investment Trusts"],
+  "Technology": ["Digital Services", "Semiconductors", "Software", "Technology Equipment"],
+  "Telecommunications & Media": ["Media", "Telecommunications Equipment", "Telecommunications Service Providers"],
+  "Transportation & Logistics": ["Transportation & Logistics Services", "Transportation Equipment"],
+  "Utilities": ["Electricity", "Gas, Water & Multi-Utilities", "Renewable Energy Electricity"],
+  // Listing structures rather than industries; Bursa files each under a single sub-sector.
+  "SPAC": ["SPAC"],
+  "Closed-end Fund": ["Closed-end Fund"],
+};
+
+/**
+ * Every sub-sector the app knows, in sector order and without repeats.
+ *
+ * What the journal's filter offers before a sector is chosen: the list is small enough to show whole,
+ * and a reader looking for "Renewable Energy" should not have to know it is filed under Energy to
+ * find it — a sub-sector is matched on its name, which is the only identity it has.
+ *
+ * No name is filed under two sectors. That is not decoration: the breakdown and the journal show the
+ * name alone (see `subSectorOf`), so one name under two sectors would merge two businesses into one
+ * row of the table and one bar of the chart. `scripts/calc-check.mts` fails the moment the taxonomy
+ * stops holding it.
+ */
+export const ALL_SUB_SECTORS = [...new Set(BURSA_SECTORS.flatMap(sector => SUB_SECTORS[sector] ?? []))];
+
 /** How a trade with no sector reads, in the journal and in the analytics groupings. */
 export const SECTOR_UNSET = "Not set";
 
@@ -160,6 +235,55 @@ export const BURSA_BOARD_LOT = 100;
 export function sectorOf(trade: { sector?: string | null }) {
   const s = typeof trade?.sector === "string" ? trade.sector.trim() : "";
   return s === "" ? SECTOR_UNSET : s;
+}
+
+/** The sub-sectors recorded under a sector; empty for a sector this app does not know. */
+export function subSectorsFor(sector: string | null | undefined): readonly string[] {
+  const s = typeof sector === "string" ? sector.trim() : "";
+  return SUB_SECTORS[s] ?? [];
+}
+
+/**
+ * How a trade's sub-sector reads in a grouping: the name on its own, or `Not set`.
+ *
+ * Not `Technology · Semiconductors` as it first read. The sector was carried in the label for names
+ * that repeat across sectors, and none do (see `ALL_SUB_SECTORS`) — so the pair was printing the
+ * coarse half of Bursa's two-tier classification beside its own finer half, which is one fact twice.
+ * A trade with no sub-sector reads as `Not set` rather than as its sector, which keeps the
+ * unclassified trades in one line to work through instead of one line per sector to skip.
+ */
+export function subSectorOf(trade: { sector?: string | null; sub_sector?: string | null }) {
+  const sub = typeof trade?.sub_sector === "string" ? trade.sub_sector.trim() : "";
+  return sub === "" ? SECTOR_UNSET : sub;
+}
+
+/**
+ * How a trade's classification reads: the sub-sector where the stock has one, the sector where it
+ * does not, and `Not set` where there is neither.
+ *
+ * One value rather than the `sector · sub-sector` pair the journal used to draw in two columns,
+ * because the pair is the same fact twice: the sub-sector is the finer of the exchange's two levels,
+ * so naming it already names the sector it sits in. Where only the coarse half was recorded the
+ * sector is all there is to say — and that is what makes the column readable as work to finish, since
+ * the rows still reading a bare sector are the ones with no sub-sector yet.
+ */
+export function classificationOf(trade: { sector?: string | null; sub_sector?: string | null }) {
+  const sub = typeof trade?.sub_sector === "string" ? trade.sub_sector.trim() : "";
+  return sub === "" ? sectorOf(trade) : sub;
+}
+
+/**
+ * Whether a recorded sub-sector still belongs to the sector beside it.
+ *
+ * Changing a symbol's sector is what makes this worth asking: "Semiconductors" under Financial
+ * Services is not a classification the exchange has, so the two fields are only allowed to disagree
+ * long enough to be corrected — the managers use this to decide whether a sector change clears the
+ * sub-sector or leaves it standing.
+ */
+export function isSubSectorOf(sector: string | null | undefined, subSector: string | null | undefined): boolean {
+  const sub = typeof subSector === "string" ? subSector.trim() : "";
+  if (sub === "") return false;
+  return subSectorsFor(sector).includes(sub);
 }
 
 /**

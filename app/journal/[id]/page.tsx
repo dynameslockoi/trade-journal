@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { describeIpo, describeLeg, ipoTitle } from "@/lib/fees";
 import { KEYS } from "@/lib/data";
 import { invalidate } from "@/lib/query-cache";
-import { embedAccount, embedStrategy, formatDuration, formatLots, formatMoney, formatPrice, formatR, normalizeTrade, shortDateTime } from "@/lib/trading";
+import { classificationOf, embedAccount, embedStrategy, formatDuration, formatLots, formatMoney, formatPrice, formatR, normalizeTrade, SECTOR_UNSET, shortDateTime } from "@/lib/trading";
 
 export default function Detail() {
   const { id } = useParams<{ id: string }>();
@@ -64,14 +64,17 @@ export default function Detail() {
   const lots = formatLots(t.position_size, { shares: false });
   const entryValue = Number(t.position_size || 0) * Number(t.entry_price || 0);
   const exitValue = Number(t.position_size || 0) * Number(t.exit_price || 0);
+  // The sub-sector where the stock has one, the sector where it does not — one value (see
+  // `classificationOf`), read twice below: the chip beside the ticker and the tile.
+  const classification = classificationOf(t);
 
   return <div className="content max-w-[1100px]">
     <PageHeader
       eyebrow="Journal / Trade"
       title={<>{t.symbol}{t.is_ipo && <Badge variant="ipo" className="ml-2">IPO</Badge>}
-        {/* The sector sits with the ticker, because it is a fact about the stock rather than
-            about this trade — and it is what the analytics chart is grouped by. */}
-        {t.sector && <Badge variant="outline" className="ml-2">{t.sector}</Badge>}</>}
+        {/* The classification sits with the ticker, because it is a fact about the stock rather
+            than about this trade — and it is what the analytics charts are grouped by. */}
+        {classification !== SECTOR_UNSET && <Badge variant="outline" className="ml-2">{classification}</Badge>}</>}
       subtitle={shortDateTime(t.entry_at)}
       actions={<>
         <Button variant="secondary" onClick={() => router.push("/journal")}>Back</Button>
@@ -97,7 +100,10 @@ export default function Detail() {
       <Tile label="Risk" value={t.risk_amount == null ? "—" : formatMoney(t.risk_amount, currency)} />
       <Tile label={`Contract Value · ${lots}`} value={`${formatMoney(entryValue, currency)} → ${formatMoney(exitValue, currency)}`} />
       <Tile label="Holding Time" value={t.exit_at ? formatDuration(t.entry_at, t.exit_at) : "Open"} />
-      <Tile label="Sector" value={t.sector || "—"} />
+      <Tile
+        label="Classification"
+        value={classification === SECTOR_UNSET ? "—" : classification}
+      />
     </div>
 
     <div className="grid two">

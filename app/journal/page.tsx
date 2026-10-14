@@ -22,13 +22,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatMoney, formatR, shortDateTime, type Trade } from "@/lib/trading";
+import { classificationOf, formatMoney, formatR, SECTOR_UNSET, shortDateTime, type Trade } from "@/lib/trading";
 
 /**
  * Row-id → position within a given displayed-row array, built once per array and reused.
  *
- * The sector column needs to know each row's neighbour in the *displayed* order to decide
- * whether to repeat its name — see the `cell` below. `table.getRowModel()` is the current page
+ * The classification column needs to know each row's neighbour in the *displayed* order to decide
+ * whether to repeat a name — see the `cell` below. `table.getRowModel()` is the current page
  * after sorting, filtering and pagination — the rows actually on screen — so the row directly
  * above in the DOM is genuinely `at - 1`; `getSortedRowModel()` would instead be every matching
  * trade before pagination slices it, and the first row of page 2 would compare itself to the
@@ -97,18 +97,20 @@ export default function Journal() {
       ),
     },
     {
-      id: "sector",
-      accessorFn: row => row.sector ?? "",
-      header: "Sector",
-      // Bands of neighbouring trades share a sector, so the name is only drawn when it changes —
-      // a column of repeated names is noise beside a column that reads as one block.
+      id: "classification",
+      accessorFn: row => classificationOf(row),
+      header: "Classification",
+      // One column, not the sector and the sub-sector in two: the sub-sector is the finer of Bursa's
+      // two levels, so naming it already names the sector it belongs to, and the pair drew the same
+      // fact twice. Bands of neighbouring trades share a classification, so the name is only drawn
+      // when it changes — a column of repeated names is noise beside a column that reads as one block.
       cell: ({ row, table }) => {
-        const sector = row.original.sector;
-        if (!sector) return <span className="muted">—</span>;
+        const classification = classificationOf(row.original);
+        if (classification === SECTOR_UNSET) return <span className="muted">—</span>;
         const sorted = table.getRowModel().rows;
         const at = indexOf(sorted, row.id);
-        const previous = at > 0 ? sorted[at - 1].original.sector : null;
-        return <span className={previous === sector ? "sector-repeat" : "sector-chip"}>{sector}</span>;
+        const previous = at > 0 ? classificationOf(sorted[at - 1].original) : null;
+        return <span className={previous === classification ? "sector-repeat" : "sector-chip"}>{classification}</span>;
       },
     },
     {
@@ -187,8 +189,8 @@ export default function Journal() {
           columns={columns}
           data={rows}
           initialSorting={[{ id: "entry_at", desc: true }]}
-          searchText={row => `${row.symbol} ${row.sector ?? ""} ${row.strategies?.name ?? ""} ${row.session ?? ""}`}
-          searchPlaceholder="Search symbol, sector, strategy or session…"
+          searchText={row => `${row.symbol} ${row.sector ?? ""} ${row.sub_sector ?? ""} ${row.strategies?.name ?? ""} ${row.session ?? ""}`}
+          searchPlaceholder="Search symbol, classification, strategy or session…"
           pageSize={15}
           onRowClick={row => router.push(`/journal/${row.id}`)}
           onRowHover={row => router.prefetch(`/journal/${row.id}`)}

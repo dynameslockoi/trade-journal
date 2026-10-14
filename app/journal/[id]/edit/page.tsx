@@ -5,7 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { KEYS, loadAccounts, loadStrategies, loadTags } from "@/lib/data";
 import { invalidate, readCached } from "@/lib/query-cache";
-import { BURSA_SECTORS, SESSIONS, calculateGrossPnl, calculateRisk, formatLots, formatMoney, formatR, localDatetimeToIso, lotsToShares, numberOrNull, roundMoney, sessionBucket, sessionLabel, sharesToLots, stripUnknownColumn, toLocalDatetimeInput } from "@/lib/trading";
+import { fetchLatestClassification } from "@/lib/queries";
+import { BURSA_SECTORS, SESSIONS, calculateGrossPnl, calculateRisk, formatLots, formatMoney, formatR, isSubSectorOf, localDatetimeToIso, lotsToShares, numberOrNull, roundMoney, sessionBucket, sessionLabel, sharesToLots, stripUnknownColumn, subSectorsFor, toLocalDatetimeInput } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
 import { ScreenshotInput } from "@/components/screenshot-input";
 import { ScreenshotGallery } from "@/components/screenshot-gallery";
@@ -66,6 +67,7 @@ export default function EditTrade() {
   const [sstOverride, setSstOverride] = useState("");
   const [lots, setLots] = useState("");
   const [sectorFrom, setSectorFrom] = useState("");
+  const [subSectorFrom, setSubSectorFrom] = useState("");
   // Only used when this trade is flagged as an IPO allocation; idle otherwise.
   const [ipo, setIpo] = useState<IpoState>(() => defaultIpoState(DEFAULT_BROKER_ID));
   const baseline = useRef<{
@@ -228,21 +230,34 @@ export default function EditTrade() {
     set("position_size", shares === null ? "" : String(shares));
   }
 
-  /** See the new-trade form: a symbol's sector is carried over rather than picked again. */
-  async function fillSectorFromHistory() {
+  /**
+   * See the new-trade form: a symbol's classification — sector and the sub-sector under it — is
+   * carried over rather than picked again, and only when it belongs to the sector in the field.
+   */
+  async function fillClassificationFromHistory() {
     const sym = String(form?.symbol || "").trim().toUpperCase();
-    if (!sym || form?.sector) return;
-    const { data } = await createClient()
-      .from("trades")
-      .select("sector")
-      .eq("symbol", sym)
-      .not("sector", "is", null)
-      .order("entry_at", { ascending: false })
-      .limit(1);
-    const known = data?.[0]?.sector;
+    if (!sym) return;
+    const known = await fetchLatestClassification(createClient(), sym);
     if (!known) return;
-    setForm((x: any) => (String(x.symbol || "").trim().toUpperCase() === sym && !x.sector ? { ...x, sector: known } : x));
-    setSectorFrom(sym);
+    setForm((x: any) => {
+      if (String(x.symbol || "").trim().toUpperCase() !== sym) return x;
+      const sector = x.sector || known.sector;
+      const subSector = x.sub_sector
+        || (sector === known.sector && isSubSectorOf(sector, known.subSector) ? known.subSector ?? "" : "");
+      return { ...x, sector, sub_sector: subSector };
+    });
+    if (!form?.sector) setSectorFrom(sym);
+    if (!form?.sub_sector && known.subSector && (form?.sector || known.sector) === known.sector && isSubSectorOf(known.sector, known.subSector)) {
+      setSubSectorFrom(sym);
+    }
+  }
+
+  /** Choosing a sector also decides whether the sub-sector beside it survives. */
+  function changeSector(value: string) {
+    const sector = value === SELECT_NONE ? "" : value;
+    setForm((x: any) => ({ ...x, sector, sub_sector: isSubSectorOf(sector, x.sub_sector) ? x.sub_sector : "" }));
+    setSectorFrom("");
+    setSubSectorFrom("");
   }
 
   async function removeScreenshot(shot: any) {
@@ -265,6 +280,7 @@ export default function EditTrade() {
     const payload: any = {
       symbol: String(form.symbol || "").trim().toUpperCase(),
       sector: form.sector || null,
+      sub_sector: form.sub_sector || null,
       account_id: form.account_id || null,
       strategy_id: form.strategy_id || null,
       direction: form.direction || "long",
@@ -346,14 +362,11 @@ export default function EditTrade() {
             <div className="grid three">
               <div className="form-field">
                 <Label htmlFor="et-symbol">Symbol</Label>
-                <Input id="et-symbol" required value={form.symbol || ""} onChange={e => set("symbol", e.target.value.toUpperCase())} onBlur={fillSectorFromHistory} />
+                <Input id="et-symbol" required value={form.symbol || ""} onChange={e => set("symbol", e.target.value.toUpperCase())} onBlur={fillClassificationFromHistory} />
               </div>
               <div className="form-field">
                 <Label htmlFor="et-sector">Sector</Label>
-                <Select
-                  value={form.sector || SELECT_NONE}
-                  onValueChange={v => { set("sector", v === SELECT_NONE ? "" : v); setSectorFrom(""); }}
-                >
+                <Select value={form.sector || SELECT_NONE} onValueChange={changeSector}>
                   <SelectTrigger id="et-sector"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value={SELECT_NONE}>Not set</SelectItem>
@@ -361,6 +374,23 @@ export default function EditTrade() {
                   </SelectContent>
                 </Select>
                 {sectorFrom && <span className="muted text-[10px]">from your last {sectorFrom} trade</span>}
+              </div>
+              <div className="form-field">
+                <Label htmlFor="et-sub-sector">Sub-sector</Label>
+                <Select
+                  value={form.sub_sector || SELECT_NONE}
+                  onValueChange={v => { set("sub_sector", v === SELECT_NONE ? "" : v); setSubSectorFrom(""); }}
+                  disabled={!subSectorsFor(form.sector).length}
+                >
+                  <SelectTrigger id="et-sub-sector"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SELECT_NONE}>Not set</SelectItem>
+                    {subSectorsFor(form.sector).map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {subSectorFrom
+                  ? <span className="muted text-[10px]">from your last {subSectorFrom} trade</span>
+                  : !form.sector && <span className="muted text-[10px]">Follows the sector you pick.</span>}
               </div>
               {([["entry_price", "Entry Price"], ["exit_price", "Exit Price"]] as const).map(([k, l]) => (
                 <div className="form-field" key={k}>

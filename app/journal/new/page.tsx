@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { KEYS, loadAccounts, loadStrategies, loadTags } from "@/lib/data";
 import { invalidate, useCachedQuery } from "@/lib/query-cache";
-import { BURSA_SECTORS, SESSIONS, calculateGrossPnl, calculateRisk, formatLots, formatMoney, formatR, localDatetimeToIso, lotsToShares, numberOrNull, roundMoney, sessionForTime, sessionLabel, sharesToLots, stripUnknownColumn } from "@/lib/trading";
+import { fetchLatestClassification } from "@/lib/queries";
+import { BURSA_SECTORS, SESSIONS, calculateGrossPnl, calculateRisk, formatLots, formatMoney, formatR, isSubSectorOf, localDatetimeToIso, lotsToShares, numberOrNull, roundMoney, sessionForTime, sessionLabel, sharesToLots, stripUnknownColumn, subSectorsFor } from "@/lib/trading";
 import { PageHeader } from "@/components/page-header";
 import { ScreenshotInput } from "@/components/screenshot-input";
 import { LoadError } from "@/components/load-error";
@@ -41,7 +42,7 @@ const localNow = () => {
 // once on the server and again in the browser, and the two differ by the time the page took to
 // arrive — which React reports as a hydration mismatch (the rendered "2:28 pm" against "2:32 pm").
 const init = {
-  symbol: "", sector: "", account_id: "", strategy_id: "", asset_class: "shares",
+  symbol: "", sector: "", sub_sector: "", account_id: "", strategy_id: "", asset_class: "shares",
   entry_at: "", exit_at: "",
   entry_price: "", exit_price: "", position_size: "", stop_loss: "", take_profit: "",
   gross_pnl: "0", commission: "0", swap: "0", fees: "0", risk_amount: "", risk_percent: "",
@@ -79,8 +80,9 @@ export default function NewTrade() {
   // stored, because an empty session cannot be handed to the Select (Radix rejects "" as a value,
   // and reports the value it was given as a change while it matches no option).
   const [sessionPicked, setSessionPicked] = useState<string | null>(null);
-  // Where the sector came from, so the field can say so rather than looking like it was chosen.
+  // Where the sector and sub-sector came from, so the fields can say so rather than looking chosen.
   const [sectorFrom, setSectorFrom] = useState("");
+  const [subSectorFrom, setSubSectorFrom] = useState("");
 
   // A new trade defaults to "now", which only the browser knows — so it is set once after mount.
   useEffect(() => {
@@ -151,25 +153,40 @@ export default function NewTrade() {
   // The form asks for lots and stores shares. The field keeps its own string so a half-typed
   // "12." is not parsed, echoed back as 12 and lost mid-keystroke.
   /**
-   * A sector belongs to the stock, not to the trade, so once a symbol has been given one it is
-   * carried to the next trade of that symbol instead of being picked again — the field stays empty
-   * for a symbol never traded before.
+   * A sector — and the sub-sector under it — belongs to the stock, not to the trade, so once a symbol
+   * has been classified it is carried to the next trade of that symbol instead of being picked again.
+   * The fields stay empty for a symbol never traded before.
+   *
+   * Both halves come from one row, so the symbol is asked about once; where `subsectors.sql` has not
+   * been run the sector still arrives on its own (see `fetchLatestClassification`).
    */
-  async function fillSectorFromHistory() {
+  async function fillClassificationFromHistory() {
     const sym = form.symbol.trim().toUpperCase();
-    if (!sym || form.sector) return;
-    const { data } = await createClient()
-      .from("trades")
-      .select("sector")
-      .eq("symbol", sym)
-      .not("sector", "is", null)
-      .order("entry_at", { ascending: false })
-      .limit(1);
-    const known = data?.[0]?.sector;
+    if (!sym) return;
+    const known = await fetchLatestClassification(createClient(), sym);
     if (!known) return;
     // Answered against the symbol that was asked about: typing on must not strand the old answer.
-    setForm(x => (x.symbol.trim().toUpperCase() === sym && !x.sector ? { ...x, sector: known } : x));
-    setSectorFrom(sym);
+    // The sub-sector only follows when it belongs to the sector that ends up in the field, so a
+    // sector already picked by hand cannot collect a sub-sector from a different one.
+    setForm(x => {
+      if (x.symbol.trim().toUpperCase() !== sym) return x;
+      const sector = x.sector || known.sector;
+      const subSector = x.sub_sector
+        || (sector === known.sector && isSubSectorOf(sector, known.subSector) ? known.subSector ?? "" : "");
+      return { ...x, sector, sub_sector: subSector };
+    });
+    if (!form.sector) setSectorFrom(sym);
+    if (!form.sub_sector && known.subSector && (form.sector || known.sector) === known.sector && isSubSectorOf(known.sector, known.subSector)) {
+      setSubSectorFrom(sym);
+    }
+  }
+
+  /** Choosing a sector also decides whether the sub-sector beside it survives. */
+  function changeSector(value: string) {
+    const sector = value === SELECT_NONE ? "" : value;
+    setForm(x => ({ ...x, sector, sub_sector: isSubSectorOf(sector, x.sub_sector) ? x.sub_sector : "" }));
+    setSectorFrom("");
+    setSubSectorFrom("");
   }
 
   function updateLots(value: string) {
@@ -218,6 +235,7 @@ export default function NewTrade() {
     payload.account_id = payload.account_id || null;
     payload.strategy_id = payload.strategy_id || null;
     payload.sector = payload.sector || null;
+    payload.sub_sector = payload.sub_sector || null;
 
     let { data: trade, error: insertError } = await s.from("trades").insert(payload).select("id").single();
     if (insertError && (insertError.code === "PGRST204" || /fee_breakdown/.test(insertError.message ?? ""))) {
@@ -265,14 +283,11 @@ export default function NewTrade() {
             <div className="grid three">
               <div className="form-field">
                 <Label htmlFor="nt-symbol">Symbol</Label>
-                <Input id="nt-symbol" required value={form.symbol} onChange={e => set("symbol", e.target.value.toUpperCase())} onBlur={fillSectorFromHistory} />
+                <Input id="nt-symbol" required value={form.symbol} onChange={e => set("symbol", e.target.value.toUpperCase())} onBlur={fillClassificationFromHistory} />
               </div>
               <div className="form-field">
                 <Label htmlFor="nt-sector">Sector</Label>
-                <Select
-                  value={form.sector || SELECT_NONE}
-                  onValueChange={v => { set("sector", v === SELECT_NONE ? "" : v); setSectorFrom(""); }}
-                >
+                <Select value={form.sector || SELECT_NONE} onValueChange={changeSector}>
                   <SelectTrigger id="nt-sector"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value={SELECT_NONE}>Not set</SelectItem>
@@ -280,6 +295,23 @@ export default function NewTrade() {
                   </SelectContent>
                 </Select>
                 {sectorFrom && <span className="muted text-[10px]">from your last {sectorFrom} trade</span>}
+              </div>
+              <div className="form-field">
+                <Label htmlFor="nt-sub-sector">Sub-sector</Label>
+                <Select
+                  value={form.sub_sector || SELECT_NONE}
+                  onValueChange={v => { set("sub_sector", v === SELECT_NONE ? "" : v); setSubSectorFrom(""); }}
+                  disabled={!subSectorsFor(form.sector).length}
+                >
+                  <SelectTrigger id="nt-sub-sector"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SELECT_NONE}>Not set</SelectItem>
+                    {subSectorsFor(form.sector).map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {subSectorFrom
+                  ? <span className="muted text-[10px]">from your last {subSectorFrom} trade</span>
+                  : !form.sector && <span className="muted text-[10px]">Follows the sector you pick.</span>}
               </div>
               {([["entry_price", "Entry Price"], ["exit_price", "Exit Price"]] as const).map(([k, l]) => (
                 <div className="form-field" key={k}>

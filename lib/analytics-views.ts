@@ -11,8 +11,9 @@
  *     score, and whether the shares were an IPO allocation or a market buy.
  *   * **Timing** — when you trade, how long you hold, how big you go: the Bursa hour (with its
  *     session bands), the weekday, the holding period and the position lot.
- *   * **Sectors** — which Bursa sectors pay you, including the month-by-month strip, which is the one
- *     block on the page that needs the full width to say anything.
+ *   * **Sectors** — which Bursa sectors pay you, and which sub-sector inside them, including the
+ *     month-by-month strip, which is the one block on the page that needs the full width to say
+ *     anything.
  *
  * A dimension belongs to exactly one view, and its chart and its table are always read together —
  * the table is how you find out whether a bar is one trade or a hundred, so a chart that travelled to
@@ -39,7 +40,7 @@ export type View = (typeof VIEWS)[number][0];
  * The dimensions trades are broken down by on this page — the same keys `grouped` bands trades with,
  * so every dimension listed here is one the page can actually draw.
  */
-export const DIMENSIONS = ["strategy", "sector", "hour", "weekday", "holding", "lots", "quality", "ipo"] as const;
+export const DIMENSIONS = ["strategy", "sector", "subsector", "hour", "weekday", "holding", "lots", "quality", "ipo"] as const;
 
 export type Dimension = (typeof DIMENSIONS)[number];
 
@@ -48,7 +49,7 @@ export const VIEW_DIMENSIONS: Record<View, readonly Dimension[]> = {
   overview: [],
   setups: ["strategy", "quality", "ipo"],
   timing: ["hour", "weekday", "holding", "lots"],
-  sectors: ["sector"],
+  sectors: ["sector", "subsector"],
 };
 
 /** The view a bare `/analytics` opens on. */

@@ -1,7 +1,8 @@
 -- Phase 14 — running the journal for other people: invitation-only signups, an admin who can see who
 -- is using it, and an access switch per account.
 --
--- Run this after schema.sql, hardening.sql, sectors.sql and cashflow.sql — and then run access.sql,
+-- Run this after schema.sql, hardening.sql, sectors.sql, subsectors.sql and cashflow.sql — and then
+-- run access.sql,
 -- which is the file that makes `status` and `access_until` mean something outside the app too. This
 -- one is written to be re-runnable, and it changes nothing about how the journal reads or calculates
 -- your own trades.

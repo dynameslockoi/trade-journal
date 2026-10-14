@@ -2,7 +2,7 @@
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { BURSA_SECTORS, SESSIONS, inDayRange, sessionLabel } from "@/lib/trading";
+import { ALL_SUB_SECTORS, BURSA_SECTORS, SESSIONS, inDayRange, isSubSectorOf, sessionLabel, subSectorsFor } from "@/lib/trading";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -18,8 +18,8 @@ import {
   SELECT_NONE,
 } from "@/components/ui/select";
 
-export type Filters = { account: string; symbol: string; strategy: string; sector: string; session: string; result: string; ipo: string; from: string; to: string; tag: string };
-export const emptyFilters: Filters = { account: "", symbol: "", strategy: "", sector: "", session: "", result: "", ipo: "", from: "", to: "", tag: "" };
+export type Filters = { account: string; symbol: string; strategy: string; sector: string; subSector: string; session: string; result: string; ipo: string; from: string; to: string; tag: string };
+export const emptyFilters: Filters = { account: "", symbol: "", strategy: "", sector: "", subSector: "", session: "", result: "", ipo: "", from: "", to: "", tag: "" };
 
 /** Radix refuses an empty item value, so every "any" choice travels through the sentinel. */
 const toValue = (v: string) => v || SELECT_NONE;
@@ -30,6 +30,15 @@ export function FilterBar({ filters, setFilters, accounts, strategies, tags }: {
   const [open, setOpen] = useState(false);
   const active = Object.values(filters).filter(v => v !== "").length;
   const upd = (k: keyof Filters, v: string) => setFilters(prev => ({ ...prev, [k]: v }));
+
+  /**
+   * A sector change can strand the sub-sector beside it — "Semiconductors" is not under Financial
+   * Services — so the pair is kept consistent here rather than matched field by field later.
+   */
+  function chooseSector(v: string) {
+    const sector = fromValue(v);
+    setFilters(prev => ({ ...prev, sector, subSector: isSubSectorOf(sector, prev.subSector) ? prev.subSector : "" }));
+  }
 
   return (
     <Card className="filter-card">
@@ -84,11 +93,26 @@ export function FilterBar({ filters, setFilters, accounts, strategies, tags }: {
 
               <div className="form-field">
                 <Label htmlFor="flt-sector">Sector</Label>
-                <Select value={toValue(filters.sector)} onValueChange={v => upd("sector", fromValue(v))}>
+                <Select value={toValue(filters.sector)} onValueChange={chooseSector}>
                   <SelectTrigger id="flt-sector"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value={SELECT_NONE}>All sectors</SelectItem>
                     {BURSA_SECTORS.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="form-field">
+                <Label htmlFor="flt-sub-sector">Sub-sector</Label>
+                <Select value={toValue(filters.subSector)} onValueChange={v => upd("subSector", fromValue(v))}>
+                  <SelectTrigger id="flt-sub-sector"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SELECT_NONE}>All sub-sectors</SelectItem>
+                    {/* One sector chosen narrows the list to its own; otherwise every sub-sector is
+                        offered, because a filter is a question about the journal, not a classification. */}
+                    {(filters.sector ? subSectorsFor(filters.sector) : ALL_SUB_SECTORS).map(x => (
+                      <SelectItem key={x} value={x}>{x}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -170,6 +194,7 @@ export function applyFilters(ts: any[], f: Filters, tagsByTrade?: Map<string, Se
     if (f.strategy && t.strategy_id !== f.strategy) return false;
     if (f.session && t.session !== f.session) return false;
     if (f.sector && (t.sector || "") !== f.sector) return false;
+    if (f.subSector && (t.sub_sector || "") !== f.subSector) return false;
     if (f.result === "win" && pnl <= 0) return false;
     if (f.result === "loss" && pnl >= 0) return false;
     if (f.result === "breakeven" && pnl !== 0) return false;

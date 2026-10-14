@@ -10,6 +10,8 @@
 import { readFileSync } from "node:fs";
 import {
   bestStreak,
+  BURSA_SECTORS,
+  SUB_SECTORS,
   calculateGrossPnl,
   calculateR,
   calculateRisk,
@@ -29,10 +31,15 @@ import {
   qualityBucket,
   monthBounds,
   monthKey,
+  classificationOf,
   monthLabel,
+  isSubSectorOf,
   sectorOf,
   sessionForTime,
   SECTOR_UNSET,
+  stripUnknownColumn,
+  subSectorOf,
+  subSectorsFor,
   shiftMonth,
   toLocalDatetimeInput,
   tradeYear,
@@ -192,8 +199,12 @@ for (const column of [
 ]) {
   check(`the cached projection carries ${column}`, projected.has(column), "true");
 }
-// `sector` is prepended by the retry wrapper rather than named in the list itself.
+// `sector` and `sub_sector` are prepended by the retry wrapper rather than named in the list
+// itself — and all three projections have to be spelled out, because walking down only works if
+// there is a rung below the one that failed.
 check("the cached projection carries sector", dataSource.includes("`sector,${TRADE_LIST_COLUMNS}"), "true");
+check("and the full one carries sub_sector too", dataSource.includes("`sub_sector,sector,${TRADE_LIST_COLUMNS}"), "true");
+check("and the bare one is still there to fall back to", dataSource.includes("`${TRADE_LIST_COLUMNS}"), "true");
 
 /* ----------------------------------------------------------------- bucket helpers */
 check("intraday hold", holdingBucket("2026-09-16T01:00:00Z", "2026-09-16T05:00:00Z"), "Intraday");
@@ -260,6 +271,60 @@ check("no date is outside any range", inDayRange("not a date", "2026-09-01", "20
 check("no sector reads as not set", sectorOf({ sector: null }), SECTOR_UNSET);
 check("a blank sector reads as not set", sectorOf({ sector: "   " }), SECTOR_UNSET);
 check("a sector is kept as written", sectorOf({ sector: "Technology" }), "Technology");
+
+/* ------------------------------------------------------------------ sub-sectors */
+// The name on its own, because that is how the breakdown and the journal draw it — so the name has to
+// be the whole identity, which is what the taxonomy check below holds it to.
+check("no sub-sector reads as not set", subSectorOf({ sector: "Technology", sub_sector: null }), SECTOR_UNSET);
+check("a blank sub-sector reads as not set", subSectorOf({ sector: "Technology", sub_sector: "  " }), SECTOR_UNSET);
+check("a sub-sector reads as its own name", subSectorOf({ sector: "Technology", sub_sector: "Semiconductors" }), "Semiconductors");
+check("a sub-sector whose sector shares its name reads the same", subSectorOf({ sector: "Property", sub_sector: "Property" }), "Property");
+check("a sub-sector without a sector still reads", subSectorOf({ sector: null, sub_sector: "Banking" }), "Banking");
+// One name under two sectors would merge two businesses into one row of the breakdown and one bar of
+// the chart — the sector is no longer carried alongside the name, so this is the check that keeps the
+// display honest. The list is a one-line edit in lib/trading.ts, and this is the line to read first.
+const filed = BURSA_SECTORS.flatMap(sector => (SUB_SECTORS[sector] ?? []).map(name => ({ sector, name })));
+const repeated = filed.filter(({ name }, at) => filed.findIndex(x => x.name === name) < at);
+check("no sub-sector name is filed under two sectors", repeated.map(x => `${x.name} (${x.sector})`).join(", "), "");
+// And the name still resolves the other way, which is what makes showing it alone lossless: a reader
+// who wants the sector can get it back from the sub-sector without the sector being drawn beside it.
+check("a sub-sector name finds its own sector", BURSA_SECTORS.filter(s => subSectorsFor(s).includes("Semiconductors")).join(), "Technology");
+
+/* ------------------------------------------------------------------ classification */
+// What the journal's one column and the trade page show: the finer half where it exists, the sector
+// where it does not — one value, because naming the sub-sector already names the sector it sits in.
+check("a classified trade reads its sub-sector", classificationOf({ sector: "Technology", sub_sector: "Semiconductors" }), "Semiconductors");
+check("a trade with no sub-sector reads its sector", classificationOf({ sector: "Technology", sub_sector: null }), "Technology");
+check("a blank sub-sector falls back to the sector", classificationOf({ sector: "Technology", sub_sector: "   " }), "Technology");
+check("a padded sub-sector is read trimmed", classificationOf({ sector: "Technology", sub_sector: "  Semiconductors " }), "Semiconductors");
+check("an unclassified trade reads as not set", classificationOf({ sector: null, sub_sector: null }), SECTOR_UNSET);
+check("a sub-sector without a sector still reads its sub-sector", classificationOf({ sector: null, sub_sector: "Banking" }), "Banking");
+// The form and the symbol manager both offer only what belongs to the chosen sector, so a sector
+// with an empty list would open a second field that can never be filled.
+check("every Bursa sector has sub-sectors", BURSA_SECTORS.filter(s => !subSectorsFor(s).length).join(","), "");
+check("a sector the app does not know has none", subSectorsFor("Cryptocurrency").length, 0);
+check("a sub-sector belongs to its own sector", isSubSectorOf("Technology", "Semiconductors"), true);
+check("and not to another", isSubSectorOf("Financial Services", "Semiconductors"), false);
+check("an empty sub-sector belongs to nothing", isSubSectorOf("Technology", ""), false);
+// The trade forms and the symbol manager both save a column this database may not have yet, and the
+// retry only works if the column PostgREST named is the one dropped — the message it reads is the
+// real one, because a pattern that stops matching it would leave the save failing in production.
+check(
+  "the column PostgREST named is dropped from the payload",
+  JSON.stringify(stripUnknownColumn(
+    { sector: "Technology", sub_sector: "Semiconductors" },
+    "Could not find the 'sub_sector' column of 'trades' in the schema cache",
+  )),
+  JSON.stringify({ sector: "Technology" }),
+);
+check(
+  "a message naming no column drops the phase-7 pair instead",
+  JSON.stringify(stripUnknownColumn(
+    { sector: "Technology", fee_breakdown: {}, asset_class: "shares" },
+    "Could not find the table 'public.trades' in the schema cache",
+  )),
+  JSON.stringify({ sector: "Technology" }),
+);
 
 /* ------------------------------------------------------------------ formatting */
 // An absence must never render as a zero: a blank field is not a break-even trade.

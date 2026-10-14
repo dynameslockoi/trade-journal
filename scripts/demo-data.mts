@@ -44,6 +44,8 @@ import { brokerPreset, roundTripFees, type AssetClass, type IpoChannelId, type I
 type Stock = {
   symbol: string;
   sector: string;
+  /** The sub-sector inside `sector`; must be one of `SUB_SECTORS[sector]` — demo-check asserts it. */
+  sub: string;
   price: number;
   assetClass?: AssetClass;
   /** Only meaningful on the IPO list: the channel the application was made through. */
@@ -51,50 +53,51 @@ type Stock = {
 };
 
 /**
- * Real Bursa names with a plausible price, spread across the sectors the journal knows about, so the
- * sector panels, the sentiment grid and the filter all have something real to show. The price is only
- * a starting point — the generator drifts each one across the twenty months it writes.
+ * Real Bursa names with a plausible price and their own classification, spread across the sectors the
+ * journal knows about, so the sector panels, the sub-sector breakdown, the sentiment grid and the
+ * filters all have something real to show. The price is only a starting point — the generator drifts
+ * each one across the twenty months it writes.
  */
 const STOCKS: Stock[] = [
-  { symbol: "MAYBANK", sector: "Financial Services", price: 10.2 },
-  { symbol: "CIMB", sector: "Financial Services", price: 7.6 },
-  { symbol: "PBBANK", sector: "Financial Services", price: 4.35 },
-  { symbol: "TENAGA", sector: "Utilities", price: 13.9 },
-  { symbol: "SUNMED", sector: "Health Care", price: 1.85 },
-  { symbol: "IHH", sector: "Health Care", price: 6.9 },
-  { symbol: "GAMUDA", sector: "Construction", price: 5.4 },
-  { symbol: "IJM", sector: "Construction", price: 3.1 },
-  { symbol: "SPSETIA", sector: "Property", price: 1.2 },
-  { symbol: "MAHSING", sector: "Property", price: 1.05 },
-  { symbol: "MAHB", sector: "Transportation & Logistics", price: 10.9 },
-  { symbol: "WPRTS", sector: "Transportation & Logistics", price: 4.2 },
-  { symbol: "INARI", sector: "Technology", price: 2.6 },
-  { symbol: "FRONTKN", sector: "Technology", price: 3.3 },
-  { symbol: "TM", sector: "Telecommunications & Media", price: 6.4 },
-  { symbol: "AXIATA", sector: "Telecommunications & Media", price: 2.7 },
-  { symbol: "IOICORP", sector: "Plantation", price: 3.85 },
-  { symbol: "KLK", sector: "Plantation", price: 21.0 },
-  { symbol: "PETDAG", sector: "Energy", price: 22.0 },
-  { symbol: "DIALOG", sector: "Energy", price: 2.1 },
-  { symbol: "PMETAL", sector: "Industrial Products & Services", price: 5.6 },
-  { symbol: "CMSB", sector: "Industrial Products & Services", price: 1.3 },
-  { symbol: "F&N", sector: "Consumer Products & Services", price: 30.0 },
-  { symbol: "QL", sector: "Consumer Products & Services", price: 4.7 },
+  { symbol: "MAYBANK", sector: "Financial Services", sub: "Banking", price: 10.2 },
+  { symbol: "CIMB", sector: "Financial Services", sub: "Banking", price: 7.6 },
+  { symbol: "PBBANK", sector: "Financial Services", sub: "Banking", price: 4.35 },
+  { symbol: "TENAGA", sector: "Utilities", sub: "Electricity", price: 13.9 },
+  { symbol: "SUNMED", sector: "Health Care", sub: "Health Care Providers", price: 1.85 },
+  { symbol: "IHH", sector: "Health Care", sub: "Health Care Providers", price: 6.9 },
+  { symbol: "GAMUDA", sector: "Construction", sub: "Construction", price: 5.4 },
+  { symbol: "IJM", sector: "Construction", sub: "Construction", price: 3.1 },
+  { symbol: "SPSETIA", sector: "Property", sub: "Property", price: 1.2 },
+  { symbol: "MAHSING", sector: "Property", sub: "Property", price: 1.05 },
+  { symbol: "MAHB", sector: "Transportation & Logistics", sub: "Transportation & Logistics Services", price: 10.9 },
+  { symbol: "WPRTS", sector: "Transportation & Logistics", sub: "Transportation & Logistics Services", price: 4.2 },
+  { symbol: "INARI", sector: "Technology", sub: "Semiconductors", price: 2.6 },
+  { symbol: "FRONTKN", sector: "Technology", sub: "Semiconductors", price: 3.3 },
+  { symbol: "TM", sector: "Telecommunications & Media", sub: "Telecommunications Service Providers", price: 6.4 },
+  { symbol: "AXIATA", sector: "Telecommunications & Media", sub: "Telecommunications Service Providers", price: 2.7 },
+  { symbol: "IOICORP", sector: "Plantation", sub: "Plantation", price: 3.85 },
+  { symbol: "KLK", sector: "Plantation", sub: "Plantation", price: 21.0 },
+  { symbol: "PETDAG", sector: "Energy", sub: "Oil & Gas Producers", price: 22.0 },
+  { symbol: "DIALOG", sector: "Energy", sub: "Energy Infrastructure, Equipment & Services", price: 2.1 },
+  { symbol: "PMETAL", sector: "Industrial Products & Services", sub: "Metals", price: 5.6 },
+  { symbol: "CMSB", sector: "Industrial Products & Services", sub: "Building Materials", price: 1.3 },
+  { symbol: "F&N", sector: "Consumer Products & Services", sub: "Food & Beverages", price: 30.0 },
+  { symbol: "QL", sector: "Consumer Products & Services", sub: "Agricultural Products", price: 4.7 },
   // REITs pay a different stamp-duty cap, so having two in the journal exercises that branch of the
   // fee engine rather than leaving it untested on every page that shows charges.
-  { symbol: "SUNREIT", sector: "Real Estate Investment Trusts", price: 1.9, assetClass: "reit_warrant" },
-  { symbol: "AXREIT", sector: "Real Estate Investment Trusts", price: 1.75, assetClass: "reit_warrant" },
+  { symbol: "SUNREIT", sector: "Real Estate Investment Trusts", sub: "Real Estate Investment Trusts", price: 1.9, assetClass: "reit_warrant" },
+  { symbol: "AXREIT", sector: "Real Estate Investment Trusts", sub: "Real Estate Investment Trusts", price: 1.75, assetClass: "reit_warrant" },
 ];
 
 /** Applications rather than market buys — priced by the channel, not by the brokerage schedule. */
 const IPO_STOCKS: Stock[] = [
-  { symbol: "GTA", sector: "Industrial Products & Services", price: 0.62, ipoChannel: "mplus" },
-  { symbol: "OGX", sector: "Consumer Products & Services", price: 0.4, ipoChannel: "mplus" },
-  { symbol: "BETA", sector: "Technology", price: 0.55, ipoChannel: "moomoo" },
-  { symbol: "KEEMING", sector: "Industrial Products & Services", price: 0.35, ipoChannel: "mplus" },
-  { symbol: "AMBEST", sector: "Technology", price: 0.48, ipoChannel: "moomoo" },
-  { symbol: "ISF", sector: "Property", price: 0.28, ipoChannel: "mplus" },
-  { symbol: "OGM", sector: "Energy", price: 0.5, ipoChannel: "mplus" },
+  { symbol: "GTA", sector: "Industrial Products & Services", sub: "Industrial Services", price: 0.62, ipoChannel: "mplus" },
+  { symbol: "OGX", sector: "Consumer Products & Services", sub: "Consumer Services", price: 0.4, ipoChannel: "mplus" },
+  { symbol: "BETA", sector: "Technology", sub: "Software", price: 0.55, ipoChannel: "moomoo" },
+  { symbol: "KEEMING", sector: "Industrial Products & Services", sub: "Industrial Engineering", price: 0.35, ipoChannel: "mplus" },
+  { symbol: "AMBEST", sector: "Technology", sub: "Technology Equipment", price: 0.48, ipoChannel: "moomoo" },
+  { symbol: "ISF", sector: "Property", sub: "Property", price: 0.28, ipoChannel: "mplus" },
+  { symbol: "OGM", sector: "Energy", sub: "Oil & Gas Producers", price: 0.5, ipoChannel: "mplus" },
 ];
 
 /** The form's own vocabulary, so a demo trade cannot carry a mistake or a mood the app would not offer. */
@@ -142,6 +145,7 @@ export type DemoTrade = {
   strategy: string;
   symbol: string;
   sector: string;
+  sub_sector: string;
   asset_class: AssetClass;
   session: string;
   entry_at: string;
@@ -324,6 +328,7 @@ export function buildDemoDataset(options: { today: string; seed?: number }): Dem
       strategy: ipo ? "IPO allocation flip" : pick(strategies.slice(0, 3)).name,
       symbol: stock.symbol,
       sector: stock.sector,
+      sub_sector: stock.sub,
       asset_class: stock.assetClass ?? "shares",
       session: sessionForTime(stamp(d, entryMinutes)),
       entry_at: stamp(d, entryMinutes),
@@ -404,6 +409,7 @@ export function tradeRow(t: DemoTrade, userId: string, accountId: string | null,
     strategy_id: strategyId,
     symbol: t.symbol,
     sector: t.sector,
+    sub_sector: t.sub_sector,
     asset_class: t.asset_class,
     direction: "long",
     // Never `net_pnl`: it is a generated column, and sending it is a database error rather than a

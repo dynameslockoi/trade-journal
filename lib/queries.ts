@@ -50,8 +50,8 @@ export const KEYS = {
  * and asserts the fields the calculators read are still in it, so a trim that forgets one fails
  * the checks instead of quietly changing a figure.
  *
- * It's a list rather than `*` because `sector` may not exist on the database yet and dropping a
- * name from a list is possible where dropping one from `*` is not.
+ * It's a list rather than `*` because `sector` and `sub_sector` may not exist on the database yet and
+ * dropping a name from a list is possible where dropping one from `*` is not.
  */
 export const TRADE_LIST_COLUMNS = [
   "id",
@@ -80,32 +80,68 @@ export const TRADE_LIST_COLUMNS = [
  * trade, on every page, for a value nothing ever read.
  */
 export const TRADE_LIST_EMBEDS = embedStrategy();
+export const WITH_SUB_SECTOR = `sub_sector,sector,${TRADE_LIST_COLUMNS},${TRADE_LIST_EMBEDS}`;
 export const WITH_SECTOR = `sector,${TRADE_LIST_COLUMNS},${TRADE_LIST_EMBEDS}`;
 export const WITHOUT_SECTOR = `${TRADE_LIST_COLUMNS},${TRADE_LIST_EMBEDS}`;
 
 /**
- * Whether `sector` is on this database, remembered for the session. Without the memo every page load
- * would spend a failed request discovering the same thing before running the query that works.
+ * How much of the classification this database has: both columns, the sector alone, or neither.
+ *
+ * Each column arrives in its own SQL file (`sectors.sql`, `subsectors.sql`), so all three states
+ * are real — a project that has run one and not the other is the ordinary case, not a broken one.
+ * PostgREST answers a projection that names a missing column with 42703 and cannot say which name
+ * was at fault, so discovery walks down one step at a time rather than asking.
  */
-let sectorColumn: boolean | null = null;
+const PROJECTIONS: Record<0 | 1 | 2, string> = { 0: WITHOUT_SECTOR, 1: WITH_SECTOR, 2: WITH_SUB_SECTOR };
+
+/**
+ * Which of the three projections worked, remembered for the session. Without the memo every page
+ * load would spend a failed request discovering the same thing before running the query that works.
+ */
+let classification: 0 | 1 | 2 | null = null;
 
 /** Every trade, oldest first. */
 export async function fetchTrades(s: SupabaseClient): Promise<Trade[]> {
-  const columns = sectorColumn === false ? WITHOUT_SECTOR : WITH_SECTOR;
-  let res = await s.from("trades").select(columns).order("entry_at", { ascending: true });
-  // Postgres' "undefined_column" — the one error that actually means `supabase/sectors.sql`
-  // hasn't been run. A network error, a timeout, an RLS/permission failure or a transient 500
-  // carries a different code (or none at all against a flaky connection) and must surface as a
-  // load error like any other failure, not get read as "this database doesn't have sectors" and
-  // silently and permanently switch every trade in the session to unsectored.
-  if (res.error?.code === "42703" && sectorColumn !== false) {
-    sectorColumn = false;
-    res = await s.from("trades").select(WITHOUT_SECTOR).order("entry_at", { ascending: true });
-  } else if (!res.error) {
-    sectorColumn = true;
+  // `null` means this database has not been asked yet, and the full projection is what to try.
+  if (classification === null) classification = 2;
+  let res = await s.from("trades").select(PROJECTIONS[classification]).order("entry_at", { ascending: true });
+  // Postgres' "undefined_column" — the one error that actually means one of the classification
+  // files hasn't been run. A network error, a timeout, an RLS/permission failure or a transient 500
+  // carries a different code (or none at all against a flaky connection) and must surface as a load
+  // error like any other failure, not get read as "this database has no classification" and
+  // silently and permanently drop every trade's sector for the session.
+  while (res.error?.code === "42703" && classification > 0) {
+    classification = (classification - 1) as 0 | 1 | 2;
+    res = await s.from("trades").select(PROJECTIONS[classification]).order("entry_at", { ascending: true });
   }
   if (res.error) throw new Error(res.error.message);
   return ((res.data ?? []) as any[]).map(normalizeTrade) as Trade[];
+}
+
+/**
+ * The classification recorded most recently for a symbol — the sector and sub-sector the trade forms
+ * carry over so a stock is not classified again on every trade.
+ *
+ * Asks for both columns and falls back to `sector` alone when `subsectors.sql` has not been run: the
+ * same walk `fetchTrades` makes, for the same reason. An unknown column is a fact about the schema,
+ * not a failure, and the sector already recorded on a symbol is worth more than an error message.
+ */
+export async function fetchLatestClassification(
+  s: SupabaseClient,
+  symbol: string,
+): Promise<{ sector: string; subSector: string | null } | null> {
+  const ask = (fields: string) =>
+    s.from("trades")
+      .select(fields)
+      .eq("symbol", symbol)
+      .not("sector", "is", null)
+      .order("entry_at", { ascending: false })
+      .limit(1);
+  let res = await ask("sector,sub_sector");
+  if (res.error?.code === "42703") res = await ask("sector");
+  const row = res.data?.[0] as any;
+  if (!row?.sector) return null;
+  return { sector: row.sector, subSector: row.sub_sector ?? null };
 }
 
 export async function fetchAccounts(s: SupabaseClient): Promise<any[]> {

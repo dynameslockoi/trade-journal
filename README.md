@@ -15,7 +15,7 @@ A spreadsheet diary records fills. It cannot answer the questions a trader actua
 it gets several of the numbers wrong:
 
 - **A diary has no "why".** The reason you entered, the mistake you made, the session you traded, the
-  sector the stock belongs to, the screenshot you took — none of it fits in a price column, so it never
+  sector and sub-sector the stock belongs to, the screenshot you took — none of it fits in a price column, so it never
   gets kept, and a year later the only thing left is a P&L figure with no lesson attached.
 - **Malaysian costs are per leg, not per trade.** Brokerage, clearing fee, stamp duty and SST are
   charged twice on a round trip, each with its own minimum, cap and exemption rules (M+ Global's RM8
@@ -82,14 +82,22 @@ that: the **equity curve**, the capital the percentages divide by, and your most
 ### Journal (`/journal`)
 
 Every trade in one sortable, searchable, paginated table: date, symbol (with an **IPO** badge on
-allocations and a sector chip on the first row of a run), sector, strategy, session, net P&L and R
-multiple, with a per-row menu for the things that act on a single trade. Columns can be toggled from the
-**Columns** button and any sortable column sorts.
+allocations and a classification chip on the first row of a run), **classification**, strategy, session,
+net P&L and R multiple, with a per-row menu for the things that act on a single trade.
+
+**Classification** is one column, not two: the trade's **sub-sector** where the stock has one and its
+**sector** where it does not. Bursa classifies a stock twice, and the finer half already determines the
+coarser one — no sub-sector name in the taxonomy is filed under two sectors — so drawing the pair would
+print one fact twice. A row still reading a bare sector is a row with no sub-sector yet. Columns can be
+toggled from the **Columns** button and any sortable column sorts.
 
 **Filters** are collapsed by default — unhide them when you need them and they stay out of the way
-otherwise. Available: account, symbol, strategy, **sector**, session, result
-(win/loss/breakeven), **IPO vs open market**, date range and tag. The text search covers symbol, sector,
-strategy and session. The **Sectors** button classifies whole symbols at once: pick a sector for a
+otherwise. Available: account, symbol, strategy, **sector**, **sub-sector**, session, result
+(win/loss/breakeven), **IPO vs open market**, date range and tag — choosing a sector narrows the
+sub-sector list to that sector's own. The filter keeps both levels even though the column draws one:
+"all my financials" is a coarser question than "Banking", and a filter is a question about the journal
+rather than a restatement of the column. The text search covers symbol, sector, sub-sector, strategy and
+session. The **Classification** button sets a symbol's sector and sub-sector at once: pick them for a
 ticker and every trade of that ticker is updated in one write, which is how 200-odd historical trades get
 organised without 200 edits.
 
@@ -97,8 +105,10 @@ Clicking a row opens the trade.
 
 ### The trade form (`/journal/new`, `/journal/[id]/edit`)
 
-- **Symbol and sector.** A sector is a property of the stock, so it sits beside the ticker and fills
-  itself in from your last trade of that symbol rather than being picked again.
+- **Symbol, sector and sub-sector.** Both are properties of the stock, so they sit beside the ticker:
+  the sub-sector list follows the sector you pick (Technology → Semiconductors, Software, Technology
+  Equipment, Digital Services), and both fill themselves in from your last trade of that symbol rather
+  than being picked again. Changing the sector clears a sub-sector that does not belong to it.
 - **Position is entered in lots** (100 shares) and stored as shares, because that is what the brokers'
   charges are levied on.
 - **Entry and exit prices, stop loss, take profit, risk.** Gross P&L, risk and R are computed from these
@@ -120,7 +130,8 @@ Clicking a row opens the trade.
 ### Trade detail (`/journal/[id]`)
 
 The full record: gross P&L, charges, net P&L and R multiple as headline tiles, then risk, contract value
-(in lots), holding time and sector; a Trade Details panel with account, strategy, broker, entry, exit,
+(in lots), holding time and the classification (**Semiconductors** rather than the sector around it,
+because the finer half says the coarser one too); a Trade Details panel with account, strategy, broker, entry, exit,
 position, stop loss, take profit, session, risk %, MAE and MFE; fees broken down leg by leg (or the IPO
 subscription that replaced the opening leg); the psychology scores; notes; tags; and the screenshot
 gallery. Deleting a trade removes its screenshots from storage as well.
@@ -140,15 +151,17 @@ strategy link from the dashboard opens the view that draws that strategy.
 3. **Timing** — *Hourly*, *Weekday*, *Holding Period* and *Position Lot*: when you trade, how long you
    hold, how big you go. The hourly axis skips the 12:30–14:30 break and its table subtotals per Bursa
    session.
-4. **Sectors** — the sector P&L and the **Sector Sentiment** strip: one row per sector, one column per
-   month, each cell that sector's P&L in that month with a sparkline of its running total, so a sector
-   warming up or going cold is visible instead of only its all-time total. Clicking a cell filters the
-   page to that sector's month.
+4. **Sectors** — the sector P&L, the **sub-sector** P&L inside it (Semiconductors rather than the chip
+   maker and the software house as one bar; the names need no sector beside them, because none is filed
+   under two sectors), and the
+   **Sector Sentiment** strip: one row per sector, one column per month, each cell that sector's P&L in
+   that month with a sparkline of its running total, so a sector warming up or going cold is visible
+   instead of only its all-time total. Clicking a cell filters the page to that sector's month.
 
 Every dimension is drawn as a pair — its chart beside its own breakdown table, with per-group trades,
 win rate, average and P&L — because the table is how a bar is told apart from a hundred trades. Banded
-dimensions draw a fixed axis so bands do not reshuffle under you, and sectors are ordered by what they
-actually paid.
+dimensions draw a fixed axis so bands do not reshuffle under you, and sectors and sub-sectors are ordered
+by what they actually paid, with the unclassified trades last where they read as a to-do.
 
 Every chart, table and percentage respects the same filter bar, and the capital used for drawdown comes
 from the cash ledger.
@@ -307,7 +320,7 @@ opened at 00:30 on 1 September is a September trade rather than an August one.
 
 ### 2. Create the database
 
-In your Supabase project, open the **SQL editor** and run these seven files from `supabase/`, **in this
+In your Supabase project, open the **SQL editor** and run these eight files from `supabase/`, **in this
 order**. Each one is written to be re-runnable, so a second run is harmless:
 
 | File | What it creates |
@@ -315,6 +328,7 @@ order**. Each one is written to be re-runnable, so a second run is harmless:
 | `supabase/schema.sql` | The tables (`profiles`, `trading_accounts`, `strategies`, `trades`, `tags`, `trade_tags`, `trade_screenshots`, `daily_reviews`, `weekly_reviews`), indexes, per-user RLS policies, the new-user trigger, and the **private** `trade-screenshots` storage bucket with its folder-scoped policies. |
 | `supabase/hardening.sql` | The same-owner composite keys (so a trade cannot reference someone else's account), the shape constraints on session/symbol/side, the storage size and MIME limits (10 MB; PNG/JPEG/WEBP/GIF). Constraints are added `NOT VALID`, so your existing rows are never rejected. |
 | `supabase/sectors.sql` | `trades.sector` and its index, for the sector column, filter, charts and the sentiment strip. |
+| `supabase/subsectors.sql` | `trades.sub_sector` and its index — the sub-sector inside a sector (Technology → Semiconductors), for the trade forms, the symbol manager, the filter, the journal's classification column and the sub-sector breakdown. |
 | `supabase/cashflow.sql` | `account_cash_flows` — one row per deposit or withdrawal — and seeds each account's existing opening balance as its first deposit. |
 | `supabase/admin.sql` | Invitation-only signup (`invite_codes` plus the trigger that enforces it), the access columns on `profiles` (`is_admin`, `status`, `access_until`, `note`, `invite_code`), the admin-only functions the Admin page calls, and a guard that stops a signed-in account writing those columns to its own row. |
 | `supabase/access.sql` | Adds `is_active()` and puts it into every policy that hands out a row — tables *and* the screenshot bucket — so a suspended or expired account is refused by Postgres, not only by the app. Run it after `admin.sql`. |
@@ -533,7 +547,7 @@ that quietly stopped applying — is worse than a crash:
   with the native `<select>` hidden behind the label, the grid opting out of the journal's own `th`/`td`
   rules, and the circular chosen day.
 - **`scripts/analytics-check.mts`** — the four views, which a rendered page cannot be asked about: that
-  each of the eight dimensions is charted by exactly one view, that no view is an empty tab, that a
+  each of the nine dimensions is charted by exactly one view, that no view is an empty tab, that a
   chart and its table are drawn by the one component that draws them from the same `panel.rows`, that
   the sector strip belongs to Sectors and nowhere else, and that switching writes the address bar
   without navigating (a `router.replace` would send the switch back through the server render). It also
@@ -568,7 +582,8 @@ app/                      routes (App Router)
   journal/                list, new, [id] detail, [id]/edit
   analytics, calendar, accounts, strategies, tags, reviews, zakat, settings, admin
 components/               shared UI: shell, sidebar, filter bar, stat cards, sparkline,
-                          screenshots (input + gallery), sector tools, quick add, IPO fieldset,
+                          screenshots (input + gallery), sector + sub-sector tools, quick add,
+                          IPO fieldset,
                           access-denied, access-expiry (the countdown band)
 components/ui/            shadcn/ui primitives on Radix + Tailwind
 lib/

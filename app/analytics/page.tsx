@@ -42,11 +42,11 @@ const RDistributionChart = dynamic(() => import("@/components/analytics-charts")
 import {
   bestStreak, calculateStats, capitalBehind, capitalByAccount, formatMoney, holdingBucket, HOLDING_BUCKETS, HOUR_BUCKETS, hourBucket,
   hourSession, LOTS_BUCKETS, lotsBucket, myParts, numberOrNull, QUALITY_BUCKETS,
-  percentOf, qualityBucket, SECTOR_UNSET, sectorOf, SESSION_WINDOWS, type CashFlow, type Trade,
+  percentOf, qualityBucket, SECTOR_UNSET, sectorOf, subSectorOf, SESSION_WINDOWS, type CashFlow, type Trade,
 } from "@/lib/trading";
 
 type GroupRow = { name: string; trades: number; pnl: number; wins: number; winRate: number; avg: number; order: number };
-type GroupKey = "strategy" | "sector" | "session" | "symbol" | "weekday" | "hour" | "holding" | "lots" | "quality" | "ipo";
+type GroupKey = "strategy" | "sector" | "subsector" | "session" | "symbol" | "weekday" | "hour" | "holding" | "lots" | "quality" | "ipo";
 
 /** How a trade came to you. The journal flags an allocation rather than its opposite, so the label
  * has to be derived; the order here is the axis order. */
@@ -96,6 +96,7 @@ function bandOf(t: Trade, key: GroupKey): { name: string; order: number } {
     : key === "quality" ? qualityBucket(t)
     : key === "ipo" ? (t.is_ipo ? IPO_ORIGINS[1] : IPO_ORIGINS[0])
     : key === "sector" ? sectorOf(t)
+    : key === "subsector" ? subSectorOf(t)
     : String((t as any)[key] ?? "Unassigned");
   // Weekdays sort Monday-first; bands follow their list; the rest keep insertion order.
   const order = key === "weekday" ? (date.getUTCDay() + 6) % 7 : BANDS[key]?.indexOf(name) ?? 0;
@@ -123,10 +124,10 @@ function grouped(ts: Trade[], key: GroupKey): GroupRow[] {
       // Money per trade rather than R: a band is always comparable, even with no stop losses recorded.
       avg: v.trades ? +(v.pnl / v.trades).toFixed(2) : 0,
     }))
-    // Sectors are ordered by what they made, because the question is which one pays rather than
-    // which comes first in Bursa's list — and only sectors actually traded are drawn, so the chart
-    // is not mostly empty slots. Unclassified trades stay at the end where they read as a to-do.
-    .sort((a, b) => key === "sector"
+    // Sectors and sub-sectors are ordered by what they made, because the question is which one pays
+    // rather than which comes first in Bursa's list — and only those actually traded are drawn, so
+    // the chart is not mostly empty slots. Unclassified trades stay at the end as a to-do.
+    .sort((a, b) => key === "sector" || key === "subsector"
       ? (a.name === SECTOR_UNSET ? 1 : b.name === SECTOR_UNSET ? -1 : b.pnl - a.pnl)
       : a.order - b.order);
 }
@@ -221,10 +222,11 @@ export default function Analytics() {
   const lots = useMemo(() => grouped(ts, "lots"), [ts]);
   const quality = useMemo(() => grouped(ts, "quality"), [ts]);
   const sector = useMemo(() => grouped(ts, "sector"), [ts]);
+  const subSector = useMemo(() => grouped(ts, "subsector"), [ts]);
   const ipo = useMemo(() => grouped(ts, "ipo"), [ts]);
 
   /**
-   * The eight dimensions, described once each so a chart and its table cannot drift apart: whichever
+   * The nine dimensions, described once each so a chart and its table cannot drift apart: whichever
    * view draws a dimension draws both halves of it, and `VIEW_DIMENSIONS` decides which view that is.
    */
   const panels: Record<Dimension, DimensionPanel> = {
@@ -241,6 +243,13 @@ export default function Analytics() {
       rows: sector,
       hint: "Which Bursa sectors pay you — best first, sector by sector.",
       tickFontSize: 8.5,
+    },
+    subsector: {
+      title: "Sub-sector P&L",
+      tableTitle: "Sub-sector Breakdown",
+      rows: subSector,
+      hint: "The finer half of Bursa's classification — the chip maker and the software house told apart, rather than one Technology bar.",
+      tickFontSize: 7.5,
     },
     hour: {
       title: "Hourly P&L",
@@ -395,7 +404,9 @@ export default function Analytics() {
 
             <TabsContent value="sectors" className="grid">
               <div className="grid two breakdown-grid">
-                <DimensionPair panel={panels.sector} currency={currency} />
+                {VIEW_DIMENSIONS.sectors.map(key => (
+                  <DimensionPair key={key} panel={panels[key]} currency={currency} />
+                ))}
               </div>
               {/* Full width, because a month per column needs the room the two-up grid cannot give it. */}
               {/* 320 px is the strip's height as measured in the browser at the default 24-month window
