@@ -653,6 +653,143 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
   box-shadow: 0 12px 28px -12px var(--accent-glow), inset 0 1px 0 var(--sheen);
 }
 
+/* --- one page, two panels (components/auth-card.tsx) ------------------------------------------ */
+/* The frame both halves share. The 0.88fr / 1.12fr split puts the seam at 44% of the card, which is
+   where the toggle below is placed, so the two stay aligned at any width. */
+.auth-split {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 0.88fr) minmax(0, 1.12fr);
+  width: min(880px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--r-lg) + 8px);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+/* The brand half stays dark in both themes, as the design draws it: it is the app's own card rather
+   than a page surface, so it does not follow the light/dark switch. */
+.auth-aside {
+  position: relative;
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 34px 30px; color: #f5f7fb;
+  background-color: #141127;
+  background-image:
+    radial-gradient(120% 80% at 8% 0%, rgba(139, 124, 255, 0.38), transparent 62%),
+    linear-gradient(158deg, #241b45 0%, #141127 58%, #0b0913 100%);
+}
+.auth-aside-body { display: grid; justify-items: start; gap: 12px; }
+.auth-mark {
+  width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center;
+  font-weight: 900; font-size: 18px; color: #fff; background-image: var(--grad-accent);
+  box-shadow: 0 14px 30px -12px var(--accent-glow), inset 0 1px 0 var(--sheen);
+}
+.auth-aside-title { font-size: 16px; font-weight: 800; letter-spacing: -0.02em; }
+.auth-aside-copy { margin: 0; max-width: 34ch; font-size: 11.5px; line-height: 1.6; color: rgba(245, 247, 251, 0.72); }
+.auth-points { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 9px; }
+.auth-points li { display: flex; align-items: flex-start; gap: 9px; font-size: 11px; line-height: 1.45; color: rgba(245, 247, 251, 0.86); }
+.auth-points svg { flex: none; margin-top: 1px; color: #b6a3ff; }
+
+/* The seam control: it turns as the panels swap, so the motion has a direction to read. */
+.auth-toggle {
+  position: absolute; left: 44%; top: 50%; z-index: 2;
+  width: 38px; height: 38px; padding: 0; display: grid; place-items: center;
+  transform: translate(-50%, -50%) rotate(0deg);
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--panel); color: var(--accent); cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: transform 0.42s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.16s ease, background 0.16s ease;
+}
+.auth-toggle:hover { border-color: var(--accent); background: var(--accent-soft); }
+.auth-split[data-mode="signup"] .auth-toggle { transform: translate(-50%, -50%) rotate(180deg); }
+
+.auth-main { min-width: 0; display: flex; align-items: center; }
+/* Both panels occupy the same box and only the active one is visible. The container's height is set
+   from the measured active panel (see the component): the two are different heights, so without that
+   the card would jump a hundred pixels mid-swap. The min-heights are the pre-hydration frame, before
+   that measurement exists — a few pixels out is invisible, a collapsed box is not. */
+.auth-forms {
+  position: relative; width: 100%; overflow: hidden;
+  transition: height 0.42s cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* Only until the component has measured. Left on afterwards, a min-height outranks the inline
+   height and floors the transition — the card would pop to the floor before growing.
+   The numbers are the panels' own heights (measured, and they move when a field is added), because
+   the box is `overflow: hidden`: too short a floor clips the submit button on the frame before the
+   measurement exists, and a floor that is merely too tall shows a little empty space for that same
+   frame. Set a shade under the real figure so a wrap in a narrow desktop window does not push past it. */
+.auth-forms:not([data-ready])[data-mode="signin"] { min-height: 424px; }
+.auth-forms:not([data-ready])[data-mode="signup"] { min-height: 576px; }
+/* The reset page carries one panel, so it is simply always on: there is nothing to cross-fade to and
+   no second height to measure. */
+.auth-forms[data-mode="reset"] .auth-panel { opacity: 1; pointer-events: auto; transform: none; }
+.auth-forms:not([data-ready])[data-mode="reset"] { min-height: 348px; }
+.auth-panel {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding: 38px 40px;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.42s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.auth-forms[data-mode="signin"] .auth-panel[data-panel="signin"],
+.auth-forms[data-mode="signup"] .auth-panel[data-panel="signup"] { opacity: 1; pointer-events: auto; transform: none; }
+/* The panel that is off screen parks on the side it will come back from, so both directions read as
+   a slide rather than a fade. */
+.auth-forms[data-mode="signin"] .auth-panel[data-panel="signup"] { transform: translateX(26px); }
+.auth-forms[data-mode="signup"] .auth-panel[data-panel="signin"] { transform: translateX(-26px); }
+
+.auth-form { display: grid; gap: 16px; }
+.auth-head { display: grid; gap: 6px; }
+.auth-head h1 { margin: 0; font-size: 23px; font-weight: 800; letter-spacing: -0.03em; }
+.auth-head .auth-sub { margin: 0; font-size: 11.5px; line-height: 1.55; max-width: 46ch; }
+/* One dot per panel, so the marker says which half of the page you are on and moves as it changes. */
+.auth-dots { display: flex; align-items: center; gap: 5px; margin-top: 10px; }
+.auth-dots span { width: 6px; height: 6px; border-radius: 999px; background: var(--border-strong); transition: width 0.3s ease, background 0.3s ease; }
+.auth-dots span.on { width: 22px; background: var(--accent); }
+.auth-fields { display: grid; gap: 13px; }
+.auth-field { display: grid; }
+.auth-input { position: relative; margin-top: 7px; }
+.auth-input .input { padding-left: 34px; }
+.auth-input-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); display: grid; color: var(--muted); pointer-events: none; }
+.auth-hint { margin-top: 6px; font-size: 9.5px; line-height: 1.45; }
+.auth-submit { justify-content: center; padding: 11px 16px; border-radius: 999px; }
+/* The forgotten-password link sits on the row between the fields and the button, which is where the
+   design puts it — beside "Remember me", which this app deliberately does not have. */
+.auth-links { display: flex; justify-content: flex-end; }
+.auth-foot { margin: 0; text-align: center; font-size: 11.5px; }
+.auth-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 700; color: var(--link); cursor: pointer; }
+.auth-link:hover { text-decoration: underline; }
+/* A notice that arrives after a failed attempt slides in, so the eye goes to the reason rather than to
+   the form having moved under it. */
+.auth-alert { animation: rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* The wait state: a ring that turns while the request is out. */
+.spinner {
+  width: 13px; height: 13px; flex: none; border-radius: 999px;
+  border: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-top-color: currentColor;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Phone: the brand half becomes the banner at the top of the card, as the design's phone version
+   draws it — mark and name only, with the seam control on the boundary beneath it. */
+@media (max-width: 760px) {
+  .auth-page { padding: 16px; }
+  .auth-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: 168px auto; }
+  .auth-aside { justify-content: center; align-items: center; padding: 22px 20px; text-align: center; }
+  .auth-aside-body { justify-items: center; gap: 9px; }
+  /* The pitch is what the screen has least room for, and the form is what it is for. */
+  .auth-aside-copy, .auth-points { display: none; }
+  .auth-toggle { left: 50%; top: 168px; transform: translate(-50%, -50%); }
+  .auth-split[data-mode="signup"] .auth-toggle { transform: translate(-50%, -50%); }
+  /* Pointing down at the form rather than sideways at nothing. */
+  .auth-toggle svg { transform: rotate(90deg); }
+  .auth-panel { padding: 26px 20px 28px; }
+  .auth-head h1 { font-size: 20px; }
+  .auth-forms:not([data-ready])[data-mode="signin"] { min-height: 398px; }
+  .auth-forms:not([data-ready])[data-mode="signup"] { min-height: 564px; }
+}
+
 /* ============================================================== quick add trade */
 /* A page carrying the quick-add clears it at the bottom, so the button never sits over the last
    row. Pages without it (the trade form) keep their normal bottom padding. */

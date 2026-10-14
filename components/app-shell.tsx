@@ -1,10 +1,13 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { KEYS } from "@/lib/data";
 import { loadMe, type Me } from "@/lib/admin";
 import { accessState, expiryNotice } from "@/lib/access";
-import { useCachedQuery } from "@/lib/query-cache";
+import { isStaleSession, SESSION_ENDED } from "@/lib/session";
+import { browserClient } from "@/lib/supabase/browser";
+import { clear, useCachedQuery } from "@/lib/query-cache";
 import { dateLabel, toISODate, today as todayInMalaysia } from "@/lib/dates";
 import { AccessDenied } from "@/components/access-denied";
 import { AccessExpiry } from "@/components/access-expiry";
@@ -15,7 +18,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 /** Pages that render on their own, without the workspace chrome. */
-const standaloneRoutes = ["/login", "/signup"];
+const standaloneRoutes = ["/login", "/signup", "/reset-password"];
 
 export function AppShell({ email, name, children }: { email: string; name?: string; children: React.ReactNode }) {
   const path = usePathname();
@@ -41,6 +44,31 @@ export function AppShell({ email, name, children }: { email: string; name?: stri
    */
   const notice = expiryNotice(me.data, today, { formatDate: dateLabel });
   const isAdmin = Boolean(me.data?.is_admin);
+
+  /**
+   * A session that died while the page was already open.
+   *
+   * The middleware catches the common case — a cookie whose token no longer verifies at all — because
+   * it runs before the page does. This catches the one it cannot see: a token that still verifies but
+   * no longer has an account behind it, which arrives here as a refusal from the database rather than
+   * as a redirect. Left alone that reads as an empty journal or a page of error cards, which is a
+   * worse answer than asking somebody to sign in again.
+   *
+   * The sign-out is not a courtesy here, it is the fix: the cookie is what the middleware believes,
+   * so a dead one left in place would keep bouncing a fresh sign-in straight back to the dashboard.
+   */
+  useEffect(() => {
+    if (!me.error || !isStaleSession(me.error)) return;
+    void (async () => {
+      try {
+        await (await browserClient()).auth.signOut();
+      } catch {
+        // It was already gone; clearing the cache and leaving is all that is left to do.
+      }
+      clear();
+      window.location.href = `/login?error=${encodeURIComponent(SESSION_ENDED)}`;
+    })();
+  }, [me.error]);
 
   // The pages behind the links used to be fetched in the background from here, on an idle callback.
   // Nothing needs warming now: the server reads every shared row set before it sends the page and
