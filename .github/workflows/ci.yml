@@ -1,0 +1,54 @@
+# The checks the project already trusts, run when a push could otherwise land quietly.
+#
+# The same four commands a developer runs locally, in the order that fails fastest: the compiler
+# first (a type error explains itself in seconds), then the check scripts, then the production
+# build — the only one that exercises the whole route graph, and the one whose output a deploy
+# would serve. No secrets are needed: the checks read sources and SQL, and the app renders a
+# setup screen when Supabase is unconfigured, so a build without `.env` is a real build.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the running one's answer stale; cancel it instead of
+# paying for an answer nobody will read.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck, checks and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # CI has nothing to say to Next's telemetry.
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          # The check scripts run TypeScript directly (`node --experimental-strip-types`), which
+          # needs Node 22.6 or newer; 24 is the current LTS line.
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies from the lockfile
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Checks
+        run: npm test
+
+      - name: Build
+        run: npm run build
