@@ -2,12 +2,16 @@
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CHART, axisProps, gridProps, tooltipProps } from "@/components/chart-theme";
 
-export function EquityChart({ data }: { data?: { d: string; v: number }[] }) {
+/**
+ * The area curve behind the dashboard and the analytics page. `height` lets the dashboard pair it
+ * with a column of summary figures without the two ending at different lengths.
+ */
+export function EquityChart({ data, height = 310 }: { data?: { d: string; v: number }[]; height?: number }) {
   if (!data?.length) {
-    return <div className="empty" style={{ height: 310 }}>No trades match these filters yet.</div>;
+    return <div className="empty" style={{ height }}>No trades match these filters yet.</div>;
   }
   return (
-    <div style={{ height: 310 }}>
+    <div style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
           <defs>

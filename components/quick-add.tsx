@@ -6,8 +6,18 @@ import { usePathname, useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-/** Routes where a quick-add would only point at the form you are already looking at. */
-const hiddenHere = (path: string) => path === "/journal/new" || /^\/journal\/[^/]+\/edit$/.test(path);
+/**
+ * Routes where the floating button would only point at the form you are already looking at, or would
+ * duplicate a Log Trade button the page already shows — the dashboard's header carries one.
+ */
+const hidesButton = (path: string) => path === "/" || path === "/journal/new" || /^\/journal\/[^/]+\/edit$/.test(path);
+
+/**
+ * The `N` shortcut is a separate question from the button: only the form pages drop it, where it
+ * would navigate to the page you are already on. The dashboard keeps it, so a keyboard user who
+ * relied on it does not lose the shortcut along with the button they could not see a use for.
+ */
+const hidesKey = (path: string) => path === "/journal/new" || /^\/journal\/[^/]+\/edit$/.test(path);
 
 /** True while the caret or selection is in a field, so "n" types an n instead of leaving the page. */
 function isTyping(target: EventTarget | null) {
@@ -24,10 +34,11 @@ function isTyping(target: EventTarget | null) {
 export function QuickAdd() {
   const path = usePathname();
   const router = useRouter();
-  const hidden = hiddenHere(path);
+  const noButton = hidesButton(path);
+  const noKey = hidesKey(path);
 
   useEffect(() => {
-    if (hidden) return;
+    if (noKey) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "n" && event.key !== "N") return;
       if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
@@ -39,9 +50,9 @@ export function QuickAdd() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [hidden, router]);
+  }, [noKey, router]);
 
-  if (hidden) return null;
+  if (noButton) return null;
 
   return (
     <Button asChild className="fab">

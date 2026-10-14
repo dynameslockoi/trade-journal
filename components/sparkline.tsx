@@ -6,6 +6,74 @@ const WIDTH = 100;
 const HEIGHT = 30;
 const PAD = 3;
 
+/**
+ * Bar trend for metric cards, for a series that reads better as a histogram than a line: trades per
+ * day, profit factor, counts. Long series are folded into at most `maxBars` buckets — summed for a
+ * count, averaged for a ratio — so a ninety-day window still fits a 90 px tile. Like `Sparkline`,
+ * the colour comes from `currentColor` so it follows the theme and the card's tone.
+ */
+export function SparkBars({
+  values,
+  tone = "accent",
+  height = 34,
+  maxBars = 20,
+  bucket = "mean",
+}: {
+  values: number[];
+  tone?: "accent" | "positive" | "negative" | "muted";
+  height?: number;
+  maxBars?: number;
+  /** How a bucket of several values collapses to one bar — a count sums, a ratio averages. */
+  bucket?: "mean" | "sum";
+}) {
+  const series = values.filter(value => Number.isFinite(value));
+  // A trend needs two points; a filter set with one trade simply shows no bars.
+  if (series.length < 2) return null;
+
+  const count = Math.min(maxBars, series.length);
+  const chunk = series.length / count;
+  const bars = Array.from({ length: count }, (_, i) => {
+    const slice = series.slice(Math.floor(i * chunk), Math.floor((i + 1) * chunk));
+    if (!slice.length) return 0;
+    const total = slice.reduce((sum, value) => sum + value, 0);
+    return bucket === "sum" ? total : total / slice.length;
+  });
+  const peak = Math.max(...bars, 0);
+  // An all-zero run settles on a flat baseline of hairline bars rather than dividing by nothing.
+  const scale = peak > 0 ? peak : 1;
+  const slot = WIDTH / count;
+  const barWidth = Math.max(slot * 0.62, 0.7);
+
+  return (
+    <div className="stat-spark" style={{ height, color: `var(--${tone})` }}>
+      <svg
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        preserveAspectRatio="none"
+        width="100%"
+        height="100%"
+        aria-hidden="true"
+        focusable="false"
+      >
+        {bars.map((value, i) => {
+          const h = Math.max((Math.max(value, 0) / scale) * (HEIGHT - PAD * 2), 0.8);
+          return (
+            <rect
+              key={i}
+              x={(i * slot + (slot - barWidth) / 2).toFixed(2)}
+              y={(HEIGHT - PAD - h).toFixed(2)}
+              width={barWidth.toFixed(2)}
+              height={h.toFixed(2)}
+              rx={0.8}
+              fill="currentColor"
+              fillOpacity={0.72}
+            />
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 export function Sparkline({
   values,
   tone = "accent",
