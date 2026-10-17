@@ -332,7 +332,8 @@ export default function EditTrade() {
         const path = `${user.id}/${id}/${crypto.randomUUID()}-${safe}`;
         const up = await s.storage.from("trade-screenshots").upload(path, file, { upsert: false, contentType: file.type });
         if (up.error) { setError(`Screenshot upload failed: ${up.error.message}`); setSaving(false); return; }
-        const ins = await s.from("trade_screenshots").insert({ trade_id: id, user_id: user.id, storage_path: path, kind: "after", caption: "" });
+        // No `kind`: an attachment arrives unlabelled, and the viewer names it Entry or Exit.
+        const ins = await s.from("trade_screenshots").insert({ trade_id: id, user_id: user.id, storage_path: path, caption: "" });
         if (ins.error) {
           await s.storage.from("trade-screenshots").remove([path]);
           setError(ins.error.message);
@@ -615,9 +616,14 @@ export default function EditTrade() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle>Screenshots</CardTitle></CardHeader>
+          <CardHeader className="shot-head">
+            <CardTitle>Screenshots</CardTitle>
+            {!!shots.length && <span className="shot-count">{shots.length} {shots.length === 1 ? "chart" : "charts"}</span>}
+          </CardHeader>
           <CardContent>
-            <ScreenshotGallery shots={shots} onRemove={removeScreenshot} />
+            {/* On this page the plates sit above their own upload box, so the empty state points at
+                what is directly below it instead of sending the trader somewhere else to edit. */}
+            <ScreenshotGallery shots={shots} onRemove={removeScreenshot} emptyHint="Attached charts appear here — use the box below to drag, browse, or paste one." />
             <ScreenshotInput files={files} onChange={setFiles} />
           </CardContent>
         </Card>

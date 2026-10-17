@@ -172,7 +172,12 @@ export default function Detail() {
     </Card>
 
     <Card>
-      <CardHeader><CardTitle>Screenshots</CardTitle></CardHeader>
+      <CardHeader className="shot-head">
+        <CardTitle>Screenshots</CardTitle>
+        {/* How many charts there are to look through, stated once here rather than beside every
+            plate — it is the one thing the grid cannot say at a glance. */}
+        {!!shots.length && <span className="shot-count">{shots.length} {shots.length === 1 ? "chart" : "charts"}</span>}
+      </CardHeader>
       <CardContent>
         <ScreenshotGallery shots={shots} />
       </CardContent>

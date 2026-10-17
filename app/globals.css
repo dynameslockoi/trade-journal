@@ -923,28 +923,113 @@ tbody tr.section-total td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 
 .cashflow-remove { opacity: .4; }
 .cashflow-remove:hover { opacity: 1; color: var(--negative); }
 
-.shot-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-.shot-figure { margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-/* A fixed box means a phone-shaped screenshot and a wide chart sit level, and neither can take the
-   page over — the picture is opened at full size instead. */
-.shot-thumb {
-  display: flex; align-items: center; justify-content: center;
-  width: 100%; height: 190px; padding: 0; overflow: hidden; cursor: zoom-in;
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
-  transition: border-color 0.16s ease, transform 0.16s ease;
+/* --- screenshots: chart plates (components/screenshot-gallery.tsx) ---------------------------- */
+/* A chart has to be read, not glanced at. The first plate takes the card's full width so a wide
+   TradingView capture is legible where it sits, and the rest pair up beneath it. Each frame follows
+   the picture's own proportions once it loads (`aspect-ratio` set from the loaded image), so a wide
+   chart fills its plate instead of floating in a fixed-height, letterboxed strip. */
+.shot-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.shot-count {
+  padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--tile);
+  color: var(--text-faint); font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
 }
-.shot-thumb:hover { border-color: var(--border-strong); }
-.shot-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.shot-thumb img { width: 100%; height: 100%; object-fit: contain; }
-.shot-caption { font-size: 11px; line-height: 1.45; }
+.shot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 14px; }
+.shot-figure { margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* The first chart is the trade's headline image, so it spans the row. */
+.shot-grid > .shot-figure:first-child { grid-column: 1 / -1; }
+.shot-plate {
+  position: relative; display: block; width: 100%; padding: 0; overflow: hidden; cursor: zoom-in;
+  color: inherit; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.shot-plate:hover { border-color: var(--border-strong); box-shadow: 0 18px 38px -24px var(--accent-glow); }
+.shot-plate:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* A faint dot grid stands in the margins of an unusually shaped capture, so the letterboxing reads as
+   the frame around a chart rather than an empty box. The default 16:9 is what most captures are. */
+.shot-frame {
+  display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; overflow: hidden;
+  background-color: var(--field);
+  background-image: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 0);
+  background-size: 14px 14px;
+}
+.shot-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.shot-frame-state { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-faint); }
+/* The one affordance over a picture: it says the plate opens, and it only appears while the pointer
+   (or the keyboard) is on the plate, so the chart itself is never covered. */
+.shot-expand {
+  position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 9px; border-radius: 999px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em;
+  color: #f5f7fb; background: rgba(8, 10, 16, 0.74); border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  opacity: 0; transform: translateY(-3px); pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.shot-plate:hover .shot-expand, .shot-plate:focus-visible .shot-expand { opacity: 1; transform: none; }
+.shot-meta { display: flex; align-items: baseline; gap: 7px; }
+.shot-caption {
+  min-width: 0; padding: 0 2px; font-size: 11px; line-height: 1.5; color: var(--text-dim);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.shot-caption-empty { color: var(--text-faint); }
+/* Which half of the trade a chart belongs to. The word is the whole distinction, so both labels wear
+   the same chip: colouring one of them would imply a preference that is not there. */
+.shot-kind {
+  flex: none; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--chip-bg); color: var(--chip-text);
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.shot-empty {
+  display: flex; align-items: center; gap: 12px; padding: 18px 16px;
+  border: 1px dashed var(--border-strong); border-radius: var(--r-md); background: var(--tile);
+}
+.shot-empty-icon {
+  flex: none; width: 38px; height: 38px; display: grid; place-items: center;
+  border-radius: 12px; color: var(--accent); background: var(--accent-soft);
+}
+.shot-empty-title { font-size: 12px; font-weight: 650; }
+.shot-empty-hint { margin-top: 2px; font-size: 10.5px; line-height: 1.5; color: var(--muted); }
 
+/* The viewer: one chart at a time, its note underneath, and the rest of the set one arrow away. */
+.shot-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-right: 34px; }
+.shot-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.shot-dialog-hint { display: block; margin-top: 3px; font-size: 10.5px; }
+.shot-nav { display: flex; align-items: center; gap: 6px; }
 .shot-view {
-  margin-top: 12px; padding: 10px; display: flex; align-items: center; justify-content: center;
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+  margin-top: 14px; padding: 10px; min-height: 170px;
+  display: grid; place-items: center;
+  background-color: var(--field);
+  background-image: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 0);
+  background-size: 14px 14px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
 }
-.shot-view img { max-width: 100%; max-height: 62vh; object-fit: contain; border-radius: var(--r-sm); }
-/* A picture wants the width a 580px dialog cannot give it. */
-.dialog-wide { width: min(900px, calc(100vw - 32px)); }
+/* Height-capped so the chart, its note and the footer fit one screen on a laptop without the
+   dialog scrolling: the viewer's own max-height is what is left over for the picture. */
+.shot-view img { display: block; max-width: 100%; max-height: 56vh; object-fit: contain; border-radius: var(--r-sm); }
+.shot-note { margin-top: 14px; display: grid; gap: 7px; }
+/* Naming the chart, above the note: the same shape as the dashboard's own segmented control, so a
+   label never looks like a second Save button. */
+.shot-mark { margin-top: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.shot-mark-label { font-size: 10.5px; font-weight: 600; color: var(--text-dim); }
+.shot-choice { display: inline-flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); }
+.shot-choice-btn {
+  padding: 5px 12px; border: 0; border-radius: 999px; background: transparent;
+  color: var(--text-dim); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.shot-choice-btn:hover { color: var(--text); background: var(--surface-3); }
+.shot-choice-btn[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.shot-choice-btn[aria-pressed="true"]:hover { background: var(--accent); color: #fff; }
+.shot-dialog-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.shot-dialog-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* A picture wants the width a 580px dialog cannot give it — and a chart wants more than a picture.
+   Doubled with `.dialog-content`, which states the 580px default later in this file at the same
+   weight: on equal terms the later selector wins, which is how a "900px" dialog kept coming out
+   580px wide. The viewer is declared second so it wins over the plainer wide dialog. */
+.dialog-content.dialog-wide { width: min(900px, calc(100vw - 32px)); }
+.dialog-content.shot-dialog { width: min(1040px, calc(100vw - 32px)); max-height: min(94vh, 960px); }
 
 
 /* Month / year navigation: arrows, quick pickers and the jump to today. */
@@ -1477,7 +1562,16 @@ tbody tr.row-link { cursor: pointer; }
      rules above, so this one wins on source order alone. */
   .grid.two, .grid.three, .grid.four:not(.filter-grid), .grid.four.filter-grid { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
-  .shot-grid { grid-template-columns: 1fr; }
+  .shot-grid { grid-template-columns: 1fr; gap: 14px; }
+  .shot-view { min-height: 120px; }
+  .shot-view img { max-height: 54vh; }
+  /* The viewer's Remove and Save groups stack full-width, so neither label is squeezed. */
+  .shot-dialog-foot { align-items: stretch; }
+  .shot-dialog-actions { flex: 1 1 100%; }
+  .shot-dialog-actions .btn { flex: 1 1 auto; }
+  /* The label control keeps its two halves together on a phone rather than wrapping to one per line. */
+  .shot-choice { flex: 1 1 100%; }
+  .shot-choice-btn { flex: 1 1 0; text-align: center; }
   .calc-strip { gap: 9px; flex-direction: column; }
   .filter-head { align-items: flex-start; flex-wrap: wrap; }
   .content { padding: 16px 14px 24px; }
@@ -1491,6 +1585,8 @@ tbody tr.row-link { cursor: pointer; }
   .dt-search-wrap { flex: 1 1 auto; }
   .dt-search { width: 100%; }
   .dialog-content { width: calc(100vw - 20px); padding: 16px; }
+  /* The doubled selectors above outrank this one, so the narrow-screen width is restated for them. */
+  .dialog-content.dialog-wide, .dialog-content.shot-dialog { width: calc(100vw - 20px); }
   .stat-value { font-size: 18px; }
   .page-head h1 { font-size: 17px; }
   .page-head-actions { width: 100%; }

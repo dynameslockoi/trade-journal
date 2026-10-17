@@ -254,7 +254,9 @@ export default function NewTrade() {
       const path = `${user.id}/${trade.id}/${crypto.randomUUID()}-${safe}`;
       const up = await s.storage.from("trade-screenshots").upload(path, file, { upsert: false, contentType: file.type });
       if (up.error) { await s.from("trades").delete().eq("id", trade.id); setError(`Screenshot upload failed: ${up.error.message}`); setSaving(false); return; }
-      const ins = await s.from("trade_screenshots").insert({ trade_id: trade.id, user_id: user.id, storage_path: path, kind: "after", caption: "" });
+      // No `kind`: an attachment arrives unlabelled, and the viewer names it Entry or Exit. Writing
+      // the column's own placeholder here said nothing while looking like it said something.
+      const ins = await s.from("trade_screenshots").insert({ trade_id: trade.id, user_id: user.id, storage_path: path, caption: "" });
       if (ins.error) {
         await s.storage.from("trade-screenshots").remove([path]);
         await s.from("trades").delete().eq("id", trade.id);
