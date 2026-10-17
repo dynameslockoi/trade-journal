@@ -24,6 +24,20 @@ const csp = [
 
 const nextConfig: NextConfig = {
   /**
+   * Two spellings of the same machine — `localhost` and `127.0.0.1` — but Next treats them as
+   * different origins, and it refuses its own dev resources to an origin it was not told about.
+   *
+   * That refusal is invisible where it hurts: the HTML arrives and renders, so the page *looks*
+   * signed-in-and-ready, but the module chunks are fetched with an `Origin` header the dev server
+   * rejects (`⚠ Blocked cross-origin request to Next.js dev resource`), no component ever mounts, and
+   * every button silently becomes a plain form submit. Signing in from `127.0.0.1` therefore reloaded
+   * the login page with a `?` instead of signing anybody in, while the same server on `localhost`
+   * worked. Naming both hosts means hydration happens whichever spelling the browser reached.
+   *
+   * Development only: this list is not consulted by a production build.
+   */
+  allowedDevOrigins: ["localhost", "127.0.0.1"],
+  /**
    * The journal is served from a small VPS that also runs live media services, so the server
    * has to fit in a few hundred megabytes. `standalone` is what makes that possible: Next
    * traces the imports `server.js` actually reaches and emits only those files, instead of
